@@ -1,176 +1,176 @@
-# Deploy & Transfer Guide
+# Deploy lên Jetson (arm64)
 
-Tài liệu tập hợp: nén project, copy sang máy host, push/pull Docker images (bao gồm voice_processing).
+Hướng dẫn triển khai bundle `orchestrator-on-edge-jetson-<YYYYMMDD>.zip` lên **Jetson AGX** (JetPack 6.x / r36.4, arm64). Bundle đã chứa sẵn code, config mẫu, models và wheels aarch64 — chỉ cần copy, giải nén và chạy.
 
----
+> **PC (amd64)** dùng tài liệu khác: [`docs/PC_SETUP.md`](docs/PC_SETUP.md) (người dùng) hoặc [`docs/DEV_SETUP.md`](docs/DEV_SETUP.md) (dev).
+> Muốn hiểu bundle được tạo ra thế nào → mục [Tạo bundle](#tạo-bundle-từ-máy-dev) bên dưới.
 
-## 1. Nén project (compress)
-
-### Script có sẵn: `compress.sh`
-
-Chạy trong thư mục gốc project:
-
-```bash
-cd /home/acevn/Desktop/project/orchestrator-on-edge
-chmod +x compress.sh
-./compress.sh
-```
-
-- Output mặc định: `../orchestrator-on-edge.tar.gz` → **`/home/acevn/Desktop/project/orchestrator-on-edge.tar.gz`**
-- Tùy chọn tên: `./compress.sh my-backup` → tạo `../my-backup.tar.gz`
-
-### Các thư mục/file được exclude (không đưa vào nén)
-
-| Exclude | Mục đích |
-|--------|----------|
-| `.git` | Lịch sử git |
-| `cache` | Cache các agent/orchestrator |
-| `jetson-containers/data/models` | TensorRT-LLM, Hugging Face models (rất nặng) |
-| `__pycache__` | Bytecode Python |
-| `.venv`, `venv`, `env` | Virtualenv |
-| `*.pyc` | File compiled Python |
-| `voice_processing/cache` | Cache TTS/voice |
-
-### Nén thủ công (tmux, exclude tùy chọn)
-
-```bash
-tmux new -s compress "cd /path/to/orchestrator-on-edge && tar -czvf ../orchestrator-on-edge.tar.gz --exclude='.git' --exclude='cache' --exclude='jetson-containers/data/models' --exclude='__pycache__' --exclude='voice_processing/cache' .; echo Done; exec bash"
-# Detach: Ctrl+b rồi d
-# Attach lại: tmux attach -t compress
+```mermaid
+flowchart LR
+  Zip["orchestrator-on-edge-jetson-*.zip"] -->|"scp / USB"| Jetson["Jetson"]
+  Jetson --> X1["unzip"]
+  X1 --> X2["cp .env.example .env"]
+  X2 --> X3["build base + services"]
+  X3 --> X4["./run_all.sh"]
+  X4 --> Done["voice + agents online"]
 ```
 
 ---
 
-## 2. Copy file nén sang máy host
+## 1. Yêu cầu trên Jetson
 
-Chạy lệnh **trên máy host** (máy dùng SSH vào Jetson):
+- **JetPack 6.x (r36.4)**, Ubuntu 22.04, **arm64**.
+- **Docker** + `docker compose` + **NVIDIA container runtime** (`docker info | grep -i runtime` phải thấy `nvidia`).
+- **tmux**, `bluetooth`/PulseAudio nếu dùng loa Bluetooth.
+- **llama.cpp đã build native** tại `/opt/llama.cpp/bin/llama-server` (xem [mục 5](#5-chuẩn-bị-llama-server-native)). Nếu để chỗ khác, đặt biến `LLAMA_SERVER_BIN` trong `.env`.
+- Dung lượng trống: **~25–30 GB** cho unzip + images (bundle ~4.3 GB).
+- **Internet** trong lần build đầu (pip tải transformers/sentence-transformers/sherpa/kokoro).
+
+## 2. Copy & giải nén
 
 ```bash
-# SCP
-scp <user>@<jetson_ip>:/home/acevn/Desktop/project/orchestrator-on-edge.tar.gz .
+# từ máy dev (host có file zip)
+scp orchestrator-on-edge-jetson-<YYYYMMDD>.zip <user>@<jetson_ip>:~/
+# hoặc dùng USB
 
-# Hoặc rsync (có progress)
-rsync -avz --progress <user>@<jetson_ip>:/home/acevn/Desktop/project/orchestrator-on-edge.tar.gz .
+# trên Jetson
+unzip orchestrator-on-edge-jetson-<YYYYMMDD>.zip -d ~/
+cd ~/orchestrator-on-edge
+ls -la .env.example run_all.sh docker-compose.yml
 ```
 
-Thay `<user>` (vd: `acevn`) và `<jetson_ip>` bằng IP/hostname của Jetson. Đích `.` có thể đổi thành `~/Downloads/` hoặc đường dẫn khác.
+## 3. Tạo `.env`
+
+Bundle **không** kèm `.env` thật (vì chứa secret). Tạo từ template rồi điền:
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Các giá trị **bắt buộc** phải điền:
+
+| Biến | Ghi chú |
+|------|---------|
+| `GRAPHQL_API_KEY`, `GRAPHQL_HOST`, `GRAPHQL_VEHICLE_ID` | Backend xe |
+| `SUDO_PWD` | Mật khẩu sudo cho `run_all.sh` |
+| `SPEAKER_MAC_ADDRESS` | MAC loa Bluetooth (nếu `AUDIO_MODE=bluetooth`) |
+| `LLM_MODEL_DIR` | Thư mục tuyệt đối chứa GGUF trên Jetson |
+| `LLM_MODEL_FILE` | Tên file GGUF (mặc định `Qwen3.5-4B-Q4_K_M.gguf`) |
+| `PULSE_SINK` / `PULSE_SOURCE` | Chỉ khi `AUDIO_MODE=usb` |
+
+> Dọn biến môi trường shell trước khi build/run để tránh đè `.env` của compose:
+> `unset LOCAL_LLM_URL LOCAL_LLM_MODEL` (bài học `LOCAL_LLM_URL`).
+
+## 4. Build images
+
+Thứ tự bắt buộc: `l4t-jetpack` → `l4t-base` → services.
+
+```bash
+# (chỉ khi bị prune) pull base NVIDIA
+docker pull nvcr.io/nvidia/l4t-jetpack:r36.4.0      # ~5.2 GB tải, ~15.5 GB trên disk
+
+# base dùng chung (BẮT BUỘC trước khi build service)
+docker build -f Dockerfile.l4t-base -t orchestrator-on-edge/l4t-base:r36.4.0-torch2.8 .
+docker images orchestrator-on-edge/l4t-base           # phải có tag r36.4.0-torch2.8
+
+# build các service
+docker compose -p orch_v1 build voice_processing
+docker compose -p orch_v1 build orchestrator car_control car_manual
+
+# dọn build-cache để lấy lại vài GB
+docker builder prune -f
+```
+
+> Trên Jetson không dùng `car_control_ui` (xe thật). Có thể bỏ qua service này.
+
+## 5. Chuẩn bị `llama-server` native
+
+`run_all.sh` gọi `llama-server` **native** (không trong container) để phục vụ GGUF:
+
+```bash
+# ví dụ build llama.cpp với CUDA cho Jetson
+git clone https://github.com/ggerganov/llama.cpp /opt/llama.cpp
+cmake -S /opt/llama.cpp -B /opt/llama.cpp/build -DGGML_CUDA=ON
+cmake --build /opt/llama.cpp/build --config Release -j
+# kết quả: /opt/llama.cpp/bin/llama-server
+```
+
+Model mặc định nằm ở `llama-cpp/models/Qwen3.5-4B-Q4_K_M.gguf` (đã có trong bundle). `run_all.sh` đọc `LLM_MODEL_DIR` + `LLM_MODEL_FILE` từ `.env`.
+
+## 6. Chạy
+
+```bash
+chmod +x run_all.sh
+./run_all.sh
+```
+
+`run_all.sh` sẽ:
+1. Tạo tmux session `orch_edge` (các window: `llama`, `bluetooth`, `stack`, `audit`).
+2. Setup audio (Bluetooth qua `setup_blue.sh`, hoặc USB theo `.env`).
+3. Mở `llama-server` native.
+4. `docker compose -p orch_v1 up --no-build`.
+
+Xem tiến trình:
+
+```bash
+tmux attach -t orch_edge        # detach: Ctrl+b rồi d
+```
+
+## 7. Kiểm tra
+
+```bash
+curl localhost:8000/health      # orchestrator
+curl localhost:8001/health      # car_control
+curl localhost:8002/health      # car_manual
+
+# trong log voice_processing (window stack) phải thấy:
+#   [AEC] Active ... agc=True ns=high
+```
+
+Gửi thử một request:
+
+```bash
+curl -X POST localhost:8000/v1/orchestrator/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Turn on the headlights", "session_id": "deploy"}'
+```
+
+## 8. Autostart khi boot (tùy chọn)
+
+```bash
+sudo cp orchestrator-on-edge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now orchestrator-on-edge
+journalctl -u orchestrator-on-edge.service -f
+```
+
+Chi tiết (đổi user/UID, audio mode, Anker PowerConf): xem [`SYSTEMD_SETUP.md`](SYSTEMD_SETUP.md).
 
 ---
 
-## 3. Docker: push images lên registry
+## Nội dung bundle
 
-**Lưu ý:** Images build từ L4T/Jetpack và wheel aarch64 → **chỉ chạy trên ARM64 (Jetson)**. Máy x86 không chạy được.
+**Có sẵn:** code arm64 (`orchestrator/`, `agents/`, `voice_processing/`), `docker-compose.yml`, `Dockerfile.l4t-base`, `Makefile`, `run_all.sh`, `self_heal.sh`, `setup_blue*.sh`, `*.service`, docs, `.env.example`, models (GGUF, sherpa ASR/KWS, Kokoro, silero, wake words), cache embedding (`cache/orchestrator`, `cache/car_manual`), wheels aarch64, native libs `libs/*/linux/arm64`.
 
-### Bước 1: Build
+**Không có (cố ý loại):** mọi file x86 (`docker-compose.x86.yml`, `Dockerfile.x86*`, `*.x86`), dev tooling (`stubs/`, `run_all_pc.ps1`, `car_control_ui/`, `frontend/`), secret (`.env`, `.env.x86`), venv, build outputs, `__pycache__`.
 
-```bash
-cd /home/acevn/Desktop/project/orchestrator-on-edge
-docker compose -p orch_v1 build
-```
-
-### Bước 2: Đăng nhập registry
+## Tạo bundle từ máy dev
 
 ```bash
-docker login
-# Docker Hub: username + password
-# GitHub Container Registry: username + Personal Access Token
+scripts/fetch_assets.sh --all       # tải đủ models + wheels (kiểm tra sha256)
+scripts/pack_jetson.sh              # -> dist/orchestrator-on-edge-jetson-<YYYYMMDD>.zip
 ```
 
-### Bước 3: Tag và push từng service
+Windows: `.\scripts\fetch_assets.ps1 --all` rồi `.\scripts\pack_jetson.ps1`. Script `pack_jetson` chỉ đóng gói file GGUF trỏ bởi `LLM_MODEL_FILE` (tránh kèm nhiều model).
 
-Thay `YOUR_USERNAME/YOUR_REPO` bằng registry của bạn (vd: `acevn/orchestrator-edge`).
+## Xử lý sự cố
 
-```bash
-# Kiểm tra tên image sau khi build
-docker images | grep -E "orch_v1|voice_processing"
-
-# Tag (tên có thể là orch_v1-<service> hoặc từ image: trong compose)
-docker tag orch_v1-orchestrator:latest YOUR_USERNAME/YOUR_REPO:orchestrator
-docker tag orch_v1-car_control:latest YOUR_USERNAME/YOUR_REPO:car_control
-docker tag orch_v1-car_manual:latest YOUR_USERNAME/YOUR_REPO:car_manual
-docker tag orch_v1-navigation:latest YOUR_USERNAME/YOUR_REPO:navigation
-docker tag orch_v1-infotainment:latest YOUR_USERNAME/YOUR_REPO:infotainment
-docker tag orch_v1-voice_processing:latest YOUR_USERNAME/YOUR_REPO:voice_processing
-docker tag orch_v1-cloud:latest YOUR_USERNAME/YOUR_REPO:cloud
-docker tag orch_v1-frontend:latest YOUR_USERNAME/YOUR_REPO:frontend
-
-# Nếu voice_processing dùng image: voice_processing:latest
-# docker tag voice_processing:latest YOUR_USERNAME/YOUR_REPO:voice_processing
-
-# Push
-docker push YOUR_USERNAME/YOUR_REPO:orchestrator
-docker push YOUR_USERNAME/YOUR_REPO:car_control
-docker push YOUR_USERNAME/YOUR_REPO:car_manual
-docker push YOUR_USERNAME/YOUR_REPO:navigation
-docker push YOUR_USERNAME/YOUR_REPO:infotainment
-docker push YOUR_USERNAME/YOUR_REPO:voice_processing
-docker push YOUR_USERNAME/YOUR_REPO:cloud
-docker push YOUR_USERNAME/YOUR_REPO:frontend
-```
-
----
-
-## 4. Máy khác (Jetson): pull và chạy
-
-### Yêu cầu
-
-- Máy là **Jetson / ARM64**, đã cài Docker, Docker Compose, NVIDIA container runtime.
-- Có **project trên máy** (clone repo hoặc giải nén `orchestrator-on-edge.tar.gz`) và file **`.env`** (copy từ máy cũ hoặc tạo mới).
-
-### Pull images
-
-```bash
-docker pull YOUR_USERNAME/YOUR_REPO:orchestrator
-docker pull YOUR_USERNAME/YOUR_REPO:car_control
-docker pull YOUR_USERNAME/YOUR_REPO:car_manual
-docker pull YOUR_USERNAME/YOUR_REPO:navigation
-docker pull YOUR_USERNAME/YOUR_REPO:infotainment
-docker pull YOUR_USERNAME/YOUR_REPO:voice_processing
-docker pull YOUR_USERNAME/YOUR_REPO:cloud
-docker pull YOUR_USERNAME/YOUR_REPO:frontend
-```
-
-### Chạy bằng compose dùng image
-
-Tạo file `docker-compose.pull.yml` (hoặc sửa `docker-compose.yml`): thay mọi `build:` bằng `image: YOUR_USERNAME/YOUR_REPO:<service>`, giữ nguyên `ports`, `environment`, `volumes`. Ví dụ:
-
-```yaml
-services:
-  orchestrator:
-    image: YOUR_USERNAME/YOUR_REPO:orchestrator
-    # ports, environment, volumes giống bản gốc
-  car_control:
-    image: YOUR_USERNAME/YOUR_REPO:car_control
-    # ...
-  voice_processing:
-    image: YOUR_USERNAME/YOUR_REPO:voice_processing
-    # ...
-  # ... các service còn lại
-```
-
-Chạy:
-
-```bash
-docker compose -f docker-compose.pull.yml -p orch_v1 up -d
-```
-
-### Voice processing trên máy mới
-
-Service **voice_processing** cần:
-
-- **Audio:** PulseAudio trên host, container mount `XDG_RUNTIME_DIR/pulse`, `~/.config/pulse/cookie`, device `/dev/snd`, group `audio`.
-- **network_mode: host** (đã cấu hình trong compose).
-- **Thư mục:** `./voice_processing`, `./voice_processing/output`, `./voice_processing/input_test`, `./cache/voice_processing`.
-
-Đảm bảo user chạy Docker thuộc group `audio` và Pulse đang chạy trên máy đó.
-
----
-
-## 5. Tóm tắt đường dẫn & lệnh
-
-| Nội dung | Chi tiết |
-|----------|----------|
-| File nén (sau khi chạy compress) | `/home/acevn/Desktop/project/orchestrator-on-edge.tar.gz` |
-| Copy từ Jetson về host | Trên host: `scp user@jetson_ip:/home/acevn/Desktop/project/orchestrator-on-edge.tar.gz .` |
-| Kiến trúc Docker | ARM64 (Jetson) only |
-| Script nén | `./compress.sh` hoặc `./compress.sh <tên-file>` |
+| Triệu chứng | Cách xử lý |
+|-------------|-----------|
+| `pull access denied` khi build | Thiếu bước build `Dockerfile.l4t-base` (mục 4) |
+| Log báo `[AEC] passthrough` | `.so` aarch64 không load → tạm đặt `AEC_ENABLED=0` trong `.env` |
+| Mic không mở được 16k | Revert `AUDIO_SAMPLE_RATE=48000` và `AUDIO_CHUNK=2048` trong `.env` |
+| Container nhận sai URL LLM | `unset LOCAL_LLM_URL LOCAL_LLM_MODEL` rồi chạy lại |
+| Hết disk khi build | `docker builder prune -f`; theo dõi `df -h` (peak rồi giảm) |
+| Bluetooth chưa sẵn sàng | Tăng `AUDIO_READY_TIMEOUT`; kiểm tra `SPEAKER_MAC_ADDRESS` |

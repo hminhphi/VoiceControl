@@ -55,20 +55,36 @@ KOKORO_DIR = ROOT / "voice_processing" / "kokoro_tts"
 KOKORO_FILES = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
 
 WHEELS_DIR = ROOT / "voice_processing" / "wheels"
-# torch/torchvision/torchaudio 2.8.0 for JetPack 6 (aarch64) from the Jetson index
+# All aarch64 wheels come from the NVIDIA Jetson index (JetPack 6 / CUDA 12.6).
+# Pinned by sha256 to the known-good r36.4 bundle so a mismatched build can never
+# silently replace a working wheel. No pip required — plain HTTPS download.
 WHEELS_INDEX = os.environ.get("WHEELS_INDEX", "https://pypi.jetson-ai-lab.io/jp6/cu126")
-WHEELS_PIP = [
-    ("torch", "2.8.0"),
-    ("torchvision", "0.23.0"),
-    ("torchaudio", "2.8.0"),
+WHEELS = [
+    {
+        "file": "torch-2.8.0-cp310-cp310-linux_aarch64.whl",
+        "rel": "+f/62a/1beee9f2f1470/torch-2.8.0-cp310-cp310-linux_aarch64.whl",
+        "sha256": "62a1beee9f2f147076a974d2942c90060c12771c94740830327cae705b2595fc",
+        "size": 225_979_378,
+    },
+    {
+        "file": "torchvision-0.23.0-cp310-cp310-linux_aarch64.whl",
+        "rel": "+f/907/c4c1933789645/torchvision-0.23.0-cp310-cp310-linux_aarch64.whl",
+        "sha256": "907c4c1933789645ebb20dd9181d40f8647978e6bd30086ae7b01febb937d2d1",
+        "size": 1_548_174,
+    },
+    {
+        "file": "torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl",
+        "rel": "+f/81a/775c8af36ac85/torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl",
+        "sha256": "81a775c8af36ac859fb3f4a1b2f662d5fcf284a835b6bb4ed8d0827a6aa9c0b7",
+        "size": 2_113_630,
+    },
+    {
+        "file": "onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl",
+        "rel": "+f/4eb/e6a8902dc7708/onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl",
+        "sha256": "4ebe6a8902dc7708434b2e1541b3fe629ebf434e16ab5537d1d6a622b42c622b",
+        "size": 87_892_917,
+    },
 ]
-# onnxruntime-gpu has no aarch64 wheel on PyPI; use the community build.
-ORT_URL = (
-    "https://github.com/guyin24/onnxruntime-gpu-for-jetson/releases/download/"
-    "v1.24.4/onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl"
-)
-ORT_SHA256 = "eb64c57f89f8d152e328227e118c9a36537d3cd6e1bbd3ed4781f83238835c74"
-ORT_NAME = "onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl"
 
 ASSETS_ROOT = ROOT / "voice_processing" / "agent_assets" / "models"
 SHERPA_DIR = ASSETS_ROOT
@@ -92,10 +108,10 @@ EXPECTED = [
     (ASSETS_ROOT / "kws" / "encoder.onnx", None),
     (ASSETS_ROOT / "silero_vad.onnx", None),          # tracked in git
     (ASSETS_ROOT / "hey_doh_ra.onnx", None),          # tracked in git
-    (WHEELS_DIR / "torch-2.8.0-cp310-cp310-linux_aarch64.whl", None),
-    (WHEELS_DIR / "torchvision-0.23.0-cp310-cp310-linux_aarch64.whl", None),
-    (WHEELS_DIR / "torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl", None),
-    (WHEELS_DIR / ORT_NAME, None),
+    (WHEELS_DIR / "torch-2.8.0-cp310-cp310-linux_aarch64.whl", 225_000_000),
+    (WHEELS_DIR / "torchvision-0.23.0-cp310-cp310-linux_aarch64.whl", 1_500_000),
+    (WHEELS_DIR / "torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl", 2_000_000),
+    (WHEELS_DIR / "onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl", 87_000_000),
 ]
 
 
@@ -269,25 +285,15 @@ def fetch_silero() -> None:
 
 def fetch_wheels() -> None:
     WHEELS_DIR.mkdir(parents=True, exist_ok=True)
-    if not all((WHEELS_DIR / f"{n}-{v}-cp310-cp310-linux_aarch64.whl").exists() for n, v in WHEELS_PIP):
-        log(f"Jetson wheels (torch/torchvision/torchaudio) from {WHEELS_INDEX}")
-        cmd = [
-            sys.executable, "-m", "pip", "download",
-            *[f"{n}=={v}" for n, v in WHEELS_PIP],
-            "--index-url", WHEELS_INDEX,
-            "--platform", "linux_aarch64",
-            "--python-version", "3.10",
-            "--implementation", "cp",
-            "--abi", "cp310",
-            "--only-binary", ":all:",
-            "--no-deps",
-            "-d", str(WHEELS_DIR),
-        ]
-        subprocess.check_call(cmd)
-    else:
-        log("skip (exists): torch/torchvision/torchaudio wheels")
-
-    download_url(ORT_URL, WHEELS_DIR / ORT_NAME, sha256=ORT_SHA256)
+    for w in WHEELS:
+        dest = WHEELS_DIR / w["file"]
+        if dest.exists() and _sha256(dest) == w["sha256"]:
+            log(f"skip (exists): {w['file']}")
+            continue
+        if dest.exists():
+            log(f"replace mismatched: {w['file']}")
+            dest.unlink()
+        download_url(f"{WHEELS_INDEX}/{w['rel']}", dest, sha256=w["sha256"])
 
 
 def verify() -> int:
