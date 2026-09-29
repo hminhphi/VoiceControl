@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# Shared base image — x86_64 / amd64 + NVIDIA GPU
+#
+# Dùng thay thế Dockerfile.l4t-base trên máy host amd64.
+# Base: nvidia/cuda (CUDA 12.6 + cuDNN 9) — tương đương L4T r36.x.
+#
+# Build:
+#   docker build -f Dockerfile.x86-base -t orchestrator-on-edge/x86-base:cu128 .
+# ============================================================
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+# ── 1. System packages ────────────────────────────────────────
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3.10 python3.10-dev python3-pip python3-setuptools \
+        build-essential git wget curl \
+        libopenblas0 libopenblas-dev \
+        portaudio19-dev alsa-utils libasound2-dev \
+        libasound2-plugins libpulse0 pulseaudio-utils \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make python3 → python3.10
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
+    && update-alternatives --set python3 /usr/bin/python3.10 \
+    && python3 -m pip install --upgrade pip setuptools "setuptools<70" wheel
+
+# ── 2. Python numerics ────────────────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        numpy==1.26.4 \
+        scipy==1.15.3 \
+        psutil==7.0.0 \
+        soundfile==0.13.1 \
+        soxr>=0.3.7
+
+# ── 3. PyTorch (CUDA 12.8 — hỗ trợ Blackwell sm_120 RTX 50xx) ───────────────
+# torch 2.7+ là bản đầu tiên support sm_120 (RTX 5060Ti/5070/5080/5090)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        torch==2.7.0+cu128 \
+        torchvision==0.22.0+cu128 \
+        torchaudio==2.7.0+cu128 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# ── 4. ONNX Runtime GPU (CUDA 12.x) ──────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true \
+    && python3 -m pip install onnxruntime-gpu==1.21.0
+
+RUN python3 -c "import onnxruntime as ort; \
+    providers = ort.get_available_providers(); \
+    print('[base] ONNX providers:', providers); \
+    assert 'CUDAExecutionProvider' in providers, 'CUDA EP missing'"
+
+# ── 5. sherpa-onnx (x86_64 from PyPI) ────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install "sherpa-onnx>=1.12.29"
+
+# ── 6. uv ─────────────────────────────────────────────────────
+RUN pip install uv
+
+# ── Smoke tests ───────────────────────────────────────────────
+RUN python3 -c "import torch; print('[base] torch', torch.__version__, '| cuda:', torch.cuda.is_available())"
+RUN python3 -c "import sherpa_onnx; print('[base] sherpa_onnx OK')"

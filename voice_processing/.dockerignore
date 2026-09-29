@@ -1,0 +1,14 @@
+# Runtime data is bind-mounted from the host by docker-compose and should not
+# be baked into the image.
+cache/
+output/
+input_test/
+
+# Build/runtime by-products are regenerated when needed.
+__pycache__/
+*.py[cod]
+*.egg-info/
+torch2trt/build/
+torch2trt/dist/
+whisper_trt/build/
+whisper_trt/dist/

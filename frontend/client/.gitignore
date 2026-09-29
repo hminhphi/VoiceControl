@@ -1,0 +1,91 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env
+*.env
+.env.local
+.env.*
+.venv
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
+*.out
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python packaging
+build/
+dist/
+*.egg-info/
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+*.orig
+
+# Database files
+*.sqlite3
+*.db
+
+# Test coverage
+htmlcov/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+
+# FastAPI / Uvicorn
+instance/
+*.pid
+
+# RQ / Celery
+rq_worker.log
+celerybeat-schedule
+celerybeat.pid
+
+# Qdrant local storage (if running locally)
+qdrant_storage/
+
+# Uploads / temp files
+uploads/
+temp/
+tmp/
+
+# Node (if frontend is included)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Docker
+*.env.docker
+docker-compose.override.yml
+
+# Pytest
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# LangChain cache (if used)
+.cache_langchain/
+
+params.json
+params2.json
+main3.py
+.terraform/
+todo

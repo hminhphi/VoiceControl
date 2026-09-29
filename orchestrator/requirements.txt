@@ -1,0 +1,14 @@
+a2a-sdk==0.3.24
+fastapi
+httpx
+uvicorn[standard]
+numpy
+openai
+python-dotenv
+transformers==4.46.3
+sentence-transformers==5.2.3
+tqdm
+scikit-learn
+scipy
+nltk
+sentencepiece

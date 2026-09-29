@@ -1,0 +1,336 @@
+# ============================================================
+# orchestrator-on-edge — docker-compose.yml
+#
+# Base image build order (first time only):
+#   docker build -f Dockerfile.l4t-base -t orchestrator-on-edge/l4t-base:r36.4.0-torch2.8 .
+#
+# Then start services:
+#   docker compose up -d
+#
+# Optional profiles: navigation, infotainment, cloud
+#   docker compose --profile optional up -d
+# ============================================================
+
+# Model cache convention: every service that loads HF models uses HF_HOME=/app/cache
+# and volume ./cache/<service>:/app/cache (orchestrator, car_manual, car_control, infotainment).
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
+# Shared GPU service properties (DRY)
+x-gpu-base: &gpu-base
+  runtime: nvidia
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+    - NVIDIA_DRIVER_CAPABILITIES=all
+
+# Shared L4T base image reference
+x-l4t-base-image: &l4t-base-image
+  args:
+    BASE_IMAGE: orchestrator-on-edge/l4t-base:r36.4.0-torch2.8
+
+services:
+  orchestrator:
+    build: ./orchestrator
+    logging: *default-logging
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - ORCHESTRATOR_PORT=${ORCHESTRATOR_PORT}
+      - AGENT_URLS=${AGENT_URLS:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
+      - ORCHESTRATOR_ROUTING_MODEL=${ORCHESTRATOR_ROUTING_MODEL:-}
+      - GRAPHQL_HOST=${GRAPHQL_HOST:-}
+      - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
+      - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
+      - HF_HOME=/app/cache
+    depends_on:
+      car_control:
+        condition: service_healthy
+      car_manual:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./orchestrator:/app
+      - ./cache/orchestrator:/app/cache
+
+
+  car_control:
+    build:
+      context: .
+      dockerfile: agents/car_control/Dockerfile
+      <<: *l4t-base-image
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./shared/car_control:/app/sounds
+      - ./agents/car_control:/app
+      - ./cache/car_control:/app/cache
+    environment:
+      - HF_HOME=/app/cache
+      - CAR_SIMULATOR_CONNECTED=${CAR_SIMULATOR_CONNECTED}
+      - CAR_CONTROL_BASE_URL=${CAR_CONTROL_BASE_URL:-http://car_control:8001}
+      - CAR_CONTROL_SOUNDS_DIR=${CAR_CONTROL_SOUNDS_DIR}
+      - GRAPHQL_HOST=${GRAPHQL_HOST:-}
+      - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
+      - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
+
+  car_manual:
+    build:
+      context: .
+      dockerfile: agents/car_manual/Dockerfile
+      <<: *l4t-base-image
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    environment:
+      - HF_HOME=/app/cache
+      - CAR_MANUAL_BRAND=${CAR_MANUAL_BRAND}
+      - CAR_MANUAL_SEARCH_MODE=${CAR_MANUAL_SEARCH_MODE:-embedding}
+      - CAR_MANUAL_EMBEDDING_MODEL=${CAR_MANUAL_EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
+      - CAR_MANUAL_TOP_K=${CAR_MANUAL_TOP_K:-3}
+      - CAR_MANUAL_SCORE_THRESHOLD=${CAR_MANUAL_SCORE_THRESHOLD:-0.2}
+      - CAR_MANUAL_BASE_URL=${CAR_MANUAL_BASE_URL:-http://car_manual:8002}
+    volumes:
+      - ./agents/car_manual:/app
+      - ./cache/car_manual:/app/cache
+      - ./cache/orchestrator/hub/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2:/app/cache/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2:ro
+
+  navigation:
+    profiles: ["optional"]
+    build: ./agents/navigation
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - DEMO_LAT=${DEMO_LAT:-}
+      - DEMO_LNG=${DEMO_LNG:-}
+      - DEMO_ADDRESS=${DEMO_ADDRESS:-}
+      - NAVIGATION_BASE_URL=${NAVIGATION_BASE_URL:-http://navigation:8003}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL}
+    volumes:
+      - ./agents/navigation:/app
+
+  infotainment:
+    profiles: ["optional"]
+    build:
+      context: .
+      dockerfile: agents/infotainment/Dockerfile
+      <<: *l4t-base-image
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 180s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./agents/infotainment:/app
+      - ./shared/infotainment:/app/media
+      - ./cache/infotainment:/app/cache
+    environment:
+      - HF_HOME=/app/cache
+      - INFOTAINMENT_BASE_URL=${INFOTAINMENT_BASE_URL:-http://infotainment:8004}
+      - INFOTAINMENT_MEDIA_DIR=${INFOTAINMENT_MEDIA_DIR}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL}
+
+  voice_processing:
+    build:
+      context: .
+      dockerfile: voice_processing/Dockerfile
+      args:
+        BASE_IMAGE: orchestrator-on-edge/l4t-base:r36.4.0-torch2.8
+    image: orchestrator-on-edge/voice_processing:latest
+    container_name: voice_processing
+    logging: *default-logging
+    <<: *gpu-base
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - BLUETOOTH_DEVICE_MAC=${BLUETOOTH_DEVICE_MAC:-84:D3:52:E8:9D:0F}
+      - MIC_DEVICE_NAME=${MIC_DEVICE_NAME:-pulse}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHUNK=${AUDIO_CHUNK:-1024}
+      - AUDIO_LATENCY=${AUDIO_LATENCY:-0.40}
+      - AUDIO_STATUS_LOG_INTERVAL=${AUDIO_STATUS_LOG_INTERVAL:-2.0}
+      # Thread limits
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-1}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-1}
+      - NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-1}
+      - VECLIB_MAXIMUM_THREADS=${VECLIB_MAXIMUM_THREADS:-1}
+      - OMP_WAIT_POLICY=${OMP_WAIT_POLICY:-PASSIVE}
+      - ORT_INTRA_OP_NUM_THREADS=${ORT_INTRA_OP_NUM_THREADS:-1}
+      - ORT_INTER_OP_NUM_THREADS=${ORT_INTER_OP_NUM_THREADS:-1}
+      - TORCH_NUM_THREADS=${TORCH_NUM_THREADS:-1}
+      - TORCH_NUM_INTEROP_THREADS=${TORCH_NUM_INTEROP_THREADS:-1}
+      # Audio routing
+      - PULSE_SOURCE
+      - PULSE_SINK
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
+      - PULSE_LATENCY_MSEC=${PULSE_LATENCY_MSEC:-300}
+      # Orchestrator
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
+      - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
+      - TTS_LANGUAGE=${TTS_LANGUAGE:-}
+      # STT backend selection
+      - STT_BACKEND=${STT_BACKEND:-whisper_trt}
+      - STT_MODEL=${STT_MODEL:-small.en}
+      - STT_LANGUAGE=${STT_LANGUAGE:-}
+      # sherpa-onnx STT (when STT_BACKEND=sherpa_onnx)
+      - STT_MODEL_DIR=${STT_MODEL_DIR:-/app/agent_assets/models/asr}
+      - STT_MODEL_TYPE=${STT_MODEL_TYPE:-sense_voice}
+      # Wake word backend
+      - WAKE_WORD_BACKEND=${WAKE_WORD_BACKEND:-openwakeword}
+      - WAKE_WORD_MODEL_DIR=${WAKE_WORD_MODEL_DIR:-/app/agent_assets/models/kws}
+      - WAKE_WORD_THRESHOLD=${WAKE_WORD_THRESHOLD:-0.5}
+      # AEC (Acoustic Echo Cancellation, webrtc_apm native lib)
+      - AEC_ENABLED=${AEC_ENABLED:-1}
+      - AEC_DELAY_MS=${AEC_DELAY_MS:-60}
+      - AEC_NOISE_SUPPRESS=${AEC_NOISE_SUPPRESS:-1}
+      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-high}
+      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-1}
+      # AGC2 adaptive digital + pre-amp (weak mics)
+      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-1}
+      - AEC_AGC_HEADROOM_DB=${AEC_AGC_HEADROOM_DB:-5.0}
+      - AEC_AGC_MAX_GAIN_DB=${AEC_AGC_MAX_GAIN_DB:-30.0}
+      - AEC_AGC_INITIAL_GAIN_DB=${AEC_AGC_INITIAL_GAIN_DB:-15.0}
+      - AEC_AGC_MAX_SPEED_DB=${AEC_AGC_MAX_SPEED_DB:-12.0}
+      - AEC_AGC_MAX_NOISE_DBFS=${AEC_AGC_MAX_NOISE_DBFS:--50.0}
+      - AEC_PRE_GAIN=${AEC_PRE_GAIN:-1.0}
+      # VAD thresholds + turn-taking (no mid-speech cutoff)
+      - VAD_THRESHOLD_HIGH=${VAD_THRESHOLD_HIGH:-0.55}
+      - VAD_THRESHOLD_LOW=${VAD_THRESHOLD_LOW:-0.20}
+      - VAD_DETECT_THRESHOLD=${VAD_DETECT_THRESHOLD:-0.55}
+      - VAD_FIRST_TIMEOUT=${VAD_FIRST_TIMEOUT:-8.0}
+      - SEGMENT_SILENCE=${SEGMENT_SILENCE:-1.0}
+      - TURN_END_SILENCE=${TURN_END_SILENCE:-2.5}
+      - SPEECH_PREROLL_SEC=${SPEECH_PREROLL_SEC:-0.8}
+      # Follow-up without wake-word after TTS replies
+      - FOLLOWUP_LISTEN_SEC=${FOLLOWUP_LISTEN_SEC:-12.0}
+      - FOLLOWUP_GRACE_SEC=${FOLLOWUP_GRACE_SEC:-0.2}
+      # Barge-in: interrupt TTS by speaking
+      - BARGE_IN_ENABLED=${BARGE_IN_ENABLED:-1}
+      - BARGE_IN_MIN_PLAY_SEC=${BARGE_IN_MIN_PLAY_SEC:-1.0}
+      # Cloud STT (optional)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_STT_MODEL=${OPENAI_STT_MODEL:-gpt-4o-transcribe}
+      - OPENAI_STT_TIMEOUT=${OPENAI_STT_TIMEOUT:-20}
+      - OPENAI_STT_PROMPT=${OPENAI_STT_PROMPT:-}
+      - OPENAI_TRANSCRIPTIONS_URL=${OPENAI_TRANSCRIPTIONS_URL:-https://api.openai.com/v1/audio/transcriptions}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_STT_MODEL=${ELEVENLABS_STT_MODEL:-scribe_v2_realtime}
+      - ELEVENLABS_STT_URL=${ELEVENLABS_STT_URL:-wss://api.elevenlabs.io/v1/speech-to-text/realtime}
+      - ELEVENLABS_STT_TIMEOUT=${ELEVENLABS_STT_TIMEOUT:-20}
+      - ELEVENLABS_STT_INCLUDE_TIMESTAMPS=${ELEVENLABS_STT_INCLUDE_TIMESTAMPS:-false}
+      - ELEVENLABS_STT_NO_VERBATIM=${ELEVENLABS_STT_NO_VERBATIM:-false}
+      - ELEVENLABS_STT_COMMIT_STRATEGY=${ELEVENLABS_STT_COMMIT_STRATEGY:-manual}
+      - NEMOTRON_MODEL_ID=${NEMOTRON_MODEL_ID:-nvidia/nemotron-speech-streaming-en-0.6b}
+    volumes:
+      - ./voice_processing/output:/app/output
+      - ./voice_processing/input_test:/app/input_test
+      - ./voice_processing:/app
+      - ./cache/voice_processing:/app/cache
+      - ${XDG_RUNTIME_DIR}/pulse:${XDG_RUNTIME_DIR}/pulse
+      - ${HOME}/.config/pulse/cookie:/root/.config/pulse/cookie
+      # Shared Tegra/CUDA libraries (read-only from host)
+      - /usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra:ro
+      - /usr/lib/aarch64-linux-gnu/nvidia:/usr/lib/aarch64-linux-gnu/nvidia:ro
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+  cloud:
+    profiles: ["optional"]
+    build: ./agents/cloud
+    logging: *default-logging
+    runtime: nvidia
+    ports:
+      - "8005:8005"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./agents/cloud:/app
+    environment:
+      - CLOUD_BASE_URL=${CLOUD_BASE_URL:-http://cloud:8005}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-12324}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
+      - QUERY_REWRITE_TIMEOUT=${QUERY_REWRITE_TIMEOUT:-6.0}
+
+  frontend:
+    build:
+      context: ./frontend/client
+      dockerfile: Dockerfile
+    logging: *default-logging
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/client:/app
+      - /app/node_modules
+    environment:
+      - VITE_ORCHESTRATOR_URL=http://192.168.1.104:${ORCHESTRATOR_PORT:-8000}
+      - PROXY_ORCHESTRATOR_URL=http://orchestrator:${ORCHESTRATOR_PORT:-8000}
+    depends_on:
+      orchestrator:
+        condition: service_healthy

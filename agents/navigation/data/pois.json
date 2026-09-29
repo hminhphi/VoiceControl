@@ -1,0 +1,76 @@
+{
+  "restaurant": [
+    {
+      "id": "r1",
+      "name": "Borchardt",
+      "address": "Französische Straße 47, 10117 Berlin",
+      "lat": 52.5150,
+      "lng": 13.3920,
+      "popularity": 9,
+      "directions": "From your current position head towards Gendarmenmarkt. Borchardt is on Französische Straße, about 400 m north of the square.",
+      "description": "Classic Berlin brasserie. Schnitzel, seafood, historic setting. Popular with politicians and celebrities."
+    },
+    {
+      "id": "r2",
+      "name": "Curry 36",
+      "address": "Mehringdamm 36, 10961 Berlin",
+      "lat": 52.4964,
+      "lng": 13.3900,
+      "popularity": 10,
+      "directions": "From your current position take Mehringdamm south. Curry 36 is on the right, near the U-Bahn station. About 600 m.",
+      "description": "Legendary currywurst stand. Berlin's most famous fast food. Open late, queues are part of the experience."
+    },
+    {
+      "id": "r3",
+      "name": "Zur letzten Instanz",
+      "address": "Waisenstraße 14-16, 10179 Berlin",
+      "lat": 52.5158,
+      "lng": 13.4102,
+      "popularity": 8,
+      "directions": "From your current position go east towards Alexanderplatz. Zur letzten Instanz is on Waisenstraße, about 500 m from the TV tower.",
+      "description": "Oldest restaurant in Berlin, since 1621. Traditional German dishes. Historic cellar and courtyard."
+    },
+    {
+      "id": "r4",
+      "name": "Tim Raue",
+      "address": "Rudi-Dutschke-Straße 26, 10969 Berlin",
+      "lat": 52.5065,
+      "lng": 13.3902,
+      "popularity": 9,
+      "directions": "From your current position head to Kreuzberg. Tim Raue is on Rudi-Dutschke-Straße, near Checkpoint Charlie. About 800 m.",
+      "description": "Two Michelin stars. Asian-inspired fine dining. Creative tasting menus, sleek modern interior."
+    }
+  ],
+  "shopping": [
+    {
+      "id": "s1",
+      "name": "Mustafa's Gemüse Kebap",
+      "address": "Mehringdamm 32, 10961 Berlin",
+      "lat": 52.4962,
+      "lng": 13.3895,
+      "popularity": 10,
+      "directions": "From your current position take Mehringdamm. Mustafa's is the famous kebab stand on the corner. Expect a queue. About 600 m.",
+      "description": "Iconic Berlin street food. Vegetable kebab with feta and sauces. Long queues, worth the wait."
+    },
+    {
+      "id": "s2",
+      "name": "KaDeWe Food Hall",
+      "address": "Tauentzienstraße 9-12, 10789 Berlin",
+      "lat": 52.5016,
+      "lng": 13.3416,
+      "popularity": 9,
+      "directions": "From your current position head to Wittenbergplatz. KaDeWe is the large department store on Tauentzienstraße. The food hall is on the sixth floor.",
+      "description": "Europe's largest department store food hall. Gourmet delicatessen, restaurants, and champagne bar. A Berlin institution."
+    },
+    {
+      "id": "s3",
+      "name": "Markthalle Neun",
+      "address": "Eisenbahnstraße 42-43, 10997 Berlin",
+      "lat": 52.4992,
+      "lng": 13.4215,
+      "popularity": 8,
+      "directions": "From your current position go to Kreuzberg. Markthalle Neun is on Eisenbahnstraße near Görlitzer Park. About 1 km east.",
+      "description": "Historic market hall. Street Food Thursday, regional produce, and small eateries. Lively and authentic."
+    }
+  ]
+}

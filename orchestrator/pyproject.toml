@@ -1,0 +1,13 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "a2a-sdk==0.3.24",
+    "fastapi",
+    "httpx",
+    "uvicorn[standard]",
+    "openai",
+    "python-dotenv",
+    "sentence-transformers",
+]

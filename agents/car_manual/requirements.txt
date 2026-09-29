@@ -1,0 +1,9 @@
+# car_manual runtime deps — installed into system site-packages on top of
+# l4t-base (which already provides torch 2.8, numpy, scipy, sherpa-onnx).
+# Pinned for reproducible builds.
+a2a-sdk[http-server]==0.3.24
+uvicorn
+python-dotenv
+sentence-transformers==5.2.3
+transformers==4.46.3
+rank_bm25==0.2.2

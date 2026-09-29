@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+# car_manual — x86_64 + NVIDIA GPU
+# Kế thừa từ x86-base (torch, onnxruntime-gpu đã có sẵn)
+ARG BASE_IMAGE=orchestrator-on-edge/x86-base:cu128
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Chỉ cài deps nhẹ — KHÔNG cài lại torch
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "a2a-sdk[http-server]==0.3.24" \
+        uvicorn \
+        sentence-transformers \
+        rank_bm25 \
+        numpy \
+        python-dotenv
+
+COPY agents/car_manual/*.py ./
+COPY agents/car_manual/data/ ./data/
+
+CMD ["python3", "main.py"]

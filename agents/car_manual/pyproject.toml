@@ -1,0 +1,15 @@
+[project]
+name = "car-manual-agent"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+# NOTE: no torch pin here — torch 2.8 comes from l4t-base system
+# site-packages (uv sync runs with --system-site-packages). Pinning the
+# wheel file would reinstall a duplicate torch (~1GB) inside the venv.
+dependencies = [
+    "a2a-sdk[http-server]==0.3.24",
+    "uvicorn",
+    "sentence-transformers",
+    "rank_bm25",
+    "numpy",
+    "python-dotenv",
+]

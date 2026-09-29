@@ -1,0 +1,14 @@
+[project]
+name = "car-control-agent"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "a2a-sdk[http-server]==0.3.24",
+    "uvicorn",
+    "python-dotenv",
+    "requests",
+    # On x86: torch installed from base image (PyPI CUDA wheel), no local whl
+    "torch>=2.6.0",
+    "numpy<2",
+    "transformers",
+]

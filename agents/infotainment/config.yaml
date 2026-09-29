@@ -1,0 +1,13 @@
+youtube:
+  base_url: "https://www.youtube.com/results"
+  headers:
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+
+classifier:
+  model: "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
+  candidate_labels:
+    - "play joke"
+    - "play music"
+    - "unknown label"
+  threshold: 0.4
+  multi_label: True

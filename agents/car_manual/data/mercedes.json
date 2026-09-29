@@ -1,0 +1,320 @@
+[
+    {
+        "q": "Who is CFO of Nissan?",
+        "a": "George Leondis"
+    },
+    {
+        "q": "Who is the CFO of Nissan?",
+        "a": "George Leondis"
+    },
+    {
+        "q": "Who is CIO Mitsubishi?",
+        "a": "Shibata Hideki"
+    },
+    {
+        "q": "Who is the CIO of Mitsubishi?",
+        "a": "Shibata Hideki"
+    },
+    {
+        "q": "wwho is cio of mitsubishi",
+        "a": "Shibata Hideki"
+    },
+    {
+        "q": "What should I do before driving my Mercedes-Benz Actros, Antos, or Arocs?",
+        "a": "Familiarize yourself with your vehicle and read the Operating Instructions before you start driving to ensure greater driving pleasure and avoid endangering yourself or others."
+    },
+    {
+        "q": "What documents should be kept in my Mercedes-Benz vehicle?",
+        "a": "The Operating Instructions, Maintenance Booklet, and supplements relating to vehicle equipment should be kept in the vehicle at all times."
+    },
+    {
+        "q": "How can I access the online Operating Instructions for my Mercedes-Benz truck?",
+        "a": "You can access the online Operating Instructions in German or English at www.mercedes-benz.de/betriebsanleitung-lkw."
+    },
+    {
+        "q": "What are some tips for environmentally responsible operation of my vehicle?",
+        "a": "Change gears in good time, use each gear only up to 2/3 of its maximum engine speed, switch off the engine in stationary traffic, avoid short trips, observe correct tire pressure, do not carry unnecessary weight, remove the roof rack when not needed, and adhere to service intervals."
+    },
+    {
+        "q": "Where should maintenance work on my Mercedes-Benz vehicle be carried out?",
+        "a": "All maintenance work should be carried out at a qualified specialized workshop."
+    },
+    {
+        "q": "What parts should I use for my Mercedes-Benz vehicle to ensure safety?",
+        "a": "Only use genuine Mercedes-Benz parts or parts of equivalent quality standard, and ensure tires and wheels are approved for your vehicle type."
+    },
+    {
+        "q": "What risks are associated with modifying electronic components in my vehicle?",
+        "a": "Modifications to electronic components, their software, or wiring could affect their function, jeopardize the operational safety of the vehicle, and increase the risk of accident and injury."
+    },
+    {
+        "q": "What happens if I connect equipment to the diagnostics connection in my vehicle?",
+        "a": "Connecting equipment to the diagnostics connection can affect vehicle system operation, potentially jeopardizing safety and increasing the risk of an accident. It may also discharge the starter battery or reset emissions monitoring information."
+    },
+    {
+        "q": "What are the consequences of increasing the engine power output of my vehicle?",
+        "a": "Increasing the engine power output could change emission levels, cause malfunctions, lead to consequential damage, and invalidate the vehicle's general operating permit and insurance cover."
+    },
+    {
+        "q": "What is required for the BlueTec exhaust gas aftertreatment system to function correctly?",
+        "a": "The BlueTec exhaust gas aftertreatment system must be operated with the reducing agent AdBlue to function correctly."
+    },
+    {
+        "q": "What happens if I operate my vehicle without AdBlue in the BlueTec system?",
+        "a": "Operating the vehicle without AdBlue or with emissions-relevant malfunctions invalidates the operating permit, and the vehicle may no longer be operated on public roads, potentially leading to legal consequences."
+    },
+    {
+        "q": "What does the restraint system in my Mercedes-Benz vehicle include?",
+        "a": "The restraint system includes the seat belt system and the driver's airbag."
+    },
+    {
+        "q": "How should I correctly fasten a seat belt in my Mercedes-Benz vehicle?",
+        "a": "Ensure the seat belt tongue is inserted into the correct buckle, the belt is tight across your body, not twisted, the shoulder section is across the center of your shoulder, and the lap belt is low across your hip joints."
+    },
+    {
+        "q": "What should I do if the restraint system warning lamp lights up?",
+        "a": "If the restraint system warning lamp lights up, the system is malfunctioning. Have it checked and repaired immediately at a qualified specialized workshop."
+    },
+    {
+        "q": "How should I secure a child in my Mercedes-Benz vehicle?",
+        "a": "Children under 12 years old and less than 1.50 m tall should be secured in a suitable child restraint system appropriate to their age, weight, and size, following the manufacturer's installation instructions."
+    },
+    {
+        "q": "What are the risks of leaving pets unsecured in the vehicle?",
+        "a": "Unsecured pets may activate vehicle equipment, switch systems on or off, or be flung around during an accident, posing a risk of accident and injury to vehicle occupants."
+    },
+    {
+        "q": "What types of keys are available for the Mercedes-Benz Actros, Antos, or Arocs?",
+        "a": "The vehicle can be equipped with a key without remote control, a key with remote control, or a multifunction key."
+    },
+    {
+        "q": "What should I do if I lose a key for my Mercedes-Benz vehicle?",
+        "a": "If you lose a key, have it disabled at a Mercedes-Benz Service Center to prevent misuse, and consider keeping a replacement key accessible for emergencies."
+    },
+    {
+        "q": "What is the range of the remote control for locking and unlocking my vehicle?",
+        "a": "The remote control can lock or unlock the vehicle from a distance of up to approximately 30 meters, though it should be used in the immediate vicinity to prevent theft."
+    },
+    {
+        "q": "How do I replace the battery in the remote control key?",
+        "a": "When the remote control battery is discharged, the on-board computer displays an event window. Replace the battery as described in the Operating Instructions."
+    },
+    {
+        "q": "How does the rechargeable battery in the multifunction key work?",
+        "a": "The rechargeable battery in the multifunction key charges automatically when the ignition lock is in the driving position. Replace it if it malfunctions."
+    },
+    {
+        "q": "What is the range of the multifunction key for operating functions?",
+        "a": "The multifunction key can operate various functions from a distance of up to approximately 100 meters, depending on surroundings, with the best range in open air with direct visual contact."
+    },
+    {
+        "q": "How do I activate or deactivate the multifunction key?",
+        "a": "To activate the key, press the confirmation button for approximately 2 seconds. To deactivate, press the confirmation button for approximately 2 seconds."
+    },
+    {
+        "q": "What functions can I access through the vehicle check menu on the multifunction key?",
+        "a": "The vehicle check menu displays AdBlue and fuel levels, reservoir pressure in brake circuits, lamp check results, and battery voltage of the vehicle batteries."
+    },
+    {
+        "q": "How can I perform a lamp check using the multifunction key?",
+        "a": "Apply the parking brake, select lamp check on the multifunction key, and the system will cycle through dipped-beam headlamps, marker lamps, turn signals, brake lights, and other lights three times."
+    },
+    {
+        "q": "What information does the operation menu on the multifunction key display?",
+        "a": "The operation menu displays the engine's total distance recorder, operating hours, tire pressure, axle loads, gross weight, and allows control of the loading tailgate and working area lamps."
+    },
+    {
+        "q": "How can I control the auxiliary heating using the multifunction key?",
+        "a": "In the comfort menu, the auxiliary heating can be switched on or off. Refer to the Climate Control section for further information."
+    },
+    {
+        "q": "How do I lock or unlock the vehicle doors using the integrated key?",
+        "a": "Insert the integrated key into the lock of the left-hand or right-hand door in position 2. Turn to position 1 to unlock or position 3 to lock."
+    },
+    {
+        "q": "How do I use the remote control to lock or unlock the vehicle?",
+        "a": "Press the button on the remote control or multifunction key to unlock, and the lock button to lock. You can configure it to unlock just the driver's door or both front doors."
+    },
+    {
+        "q": "What is the convenience closing feature and how do I use it?",
+        "a": "Convenience closing closes the side windows and sliding sunroof/pop-up roof. Insert the integrated key into the driver's door lock in position 2, turn to position 3, and hold, or press and hold the lock button on the remote control."
+    },
+    {
+        "q": "What does the ATA (anti-theft alarm system) monitor on my vehicle?",
+        "a": "ATA monitors the doors, exterior flaps, power supply, cab tilt lock, vehicle interior (can be deactivated), maintenance flap, and box-type bodies on the tractor vehicle."
+    },
+    {
+        "q": "How do I prime the ATA system on my vehicle?",
+        "a": "Close all windows, doors, and flaps, remove the key from the ignition, and press the lock button on the remote control or multifunction key. All turn signals will flash three times to confirm."
+    },
+    {
+        "q": "How do I prime the ATA system without the interior motion sensor?",
+        "a": "Remove the key from the ignition, press the top of the ATA button briefly, get out within 60 seconds, close the driver's door, and lock the vehicle. The interior motion sensor will remain deactivated for the next locking operation."
+    },
+    {
+        "q": "What happens when the ATA system triggers an alarm?",
+        "a": "When triggered, the ATA system causes all turn signals to flash for approximately 5 minutes and the alarm siren to sound for approximately 30 seconds."
+    },
+    {
+        "q": "How do I deactivate the ATA system or cancel an alarm?",
+        "a": "Press the button on the remote control or multifunction key and open the driver's door, or press the upper section of the ATA button for longer than 2 seconds."
+    },
+    {
+        "q": "What are the safety risks associated with batteries?",
+        "a": "Batteries contain toxic and corrosive substances. If swallowed, they can result in severe health problems, including a risk of fatal injury. Keep batteries out of the reach of children and seek immediate medical attention if a battery is swallowed."
+    },
+    {
+        "q": "How should batteries be disposed of?",
+        "a": "Batteries and rechargeable batteries contain pollutants and must not be disposed of as household rubbish. They should be collected separately and recycled in an environmentally friendly manner at a qualified specialist workshop or a collection facility for used batteries."
+    },
+    {
+        "q": "What happens when the remote control battery is discharged?",
+        "a": "When the remote control battery is discharged, the vehicle can no longer be locked or unlocked with the remote control. The on-board computer will indicate that the battery charge level is low."
+    },
+    {
+        "q": "How is the multifunction key battery charged?",
+        "a": "The multifunction key battery is charged automatically via the ignition lock. A new rechargeable battery can be ordered at a Mercedes-Benz Service Centre."
+    },
+    {
+        "q": "How do you replace the battery in the multifunction key?",
+        "a": "Remove the integrated key, insert it into the multifunction key and press towards the middle until the battery tray is released. Remove the tray, lift the battery, insert a new CR2025 battery, and slide the tray back in."
+    },
+    {
+        "q": "What should you do if the ATA system does not acknowledge with turn signal lamps?",
+        "a": "Switch off the ATA, check that monitored components are locked, prime the ATA again. If there is still no visual acknowledgement, have the ATA checked at a qualified specialist workshop."
+    },
+    {
+        "q": "How can you ensure safe entry and exit from the vehicle?",
+        "a": "Keep steps, door sills, grab handles, and footwear free from dirt such as mud, clay, snow, or ice to increase the safety of your footing. Use only the grab handles and steps. Do not jump down from the cab."
+    },
+    {
+        "q": "What are the risks of leaving children unattended in the vehicle?",
+        "a": "Children could set the vehicle in motion by releasing the parking brake, shifting the transmission into neutral, or starting the engine. They could also operate equipment and become trapped. Always take the key with you and lock the vehicle."
+    },
+    {
+        "q": "What are the safety risks when opening or closing side windows?",
+        "a": "Body parts could become trapped between the side window and door frame. If a side window closes with increased force after being blocked, the reversing function may not work. Ensure no body parts are in the closing area."
+    },
+    {
+        "q": "How do you open or close the side windows?",
+        "a": "Switch the ignition lock to the radio position. Press or pull the corresponding button on the driver's or co-driver's door switch panel until the side window reaches the desired position."
+    },
+    {
+        "q": "How do you reset the side windows after a malfunction?",
+        "a": "Switch the ignition lock to the radio position, press the button until the side window is fully open, press for another second, pull until fully closed, press for another second."
+    },
+    {
+        "q": "What are the risks when operating the sliding sunroof or pop-up roof?",
+        "a": "Limbs could get trapped in the sweep of the sliding sunroof or pop-up roof during opening and closing, posing a risk of injury. Ensure no limbs are in the sweep."
+    },
+    {
+        "q": "How do you open or close the sliding sunroof or pop-up roof?",
+        "a": "Press and hold the upper section of the button until it reaches the desired position. To open fully, briefly press the upper section. To close, press and hold the lower section."
+    },
+    {
+        "q": "How do you manually close the sliding sunroof or pop-up roof after a malfunction?",
+        "a": "For a sliding sunroof: press the insect screen against the sunroof, insert an Allen key through the opening into the actuator, and turn clockwise until closed. For a pop-up roof: insert a flat-blade screwdriver into the actuator and turn anti-clockwise."
+    },
+    {
+        "q": "How do you reset the sliding sunroof?",
+        "a": "After a voltage supply interruption or jerky operation, press and hold the P button until the sliding sunroof has been completely closed for approximately 3 seconds."
+    },
+    {
+        "q": "How do you operate the roller sunblinds?",
+        "a": "To extend, briefly press the button downwards for full extension, or press until the desired position. To retract, briefly push the button upwards for full retraction, or push until the desired position."
+    },
+    {
+        "q": "How do you open or close the roof hatch?",
+        "a": "Push the roof hatch up or pull it down by the handles to open or close it at one end or both ends."
+    },
+    {
+        "q": "What are the safety risks when adjusting seats?",
+        "a": "Adjusting the driver's seat, steering wheel, or mirrors while driving could cause loss of vehicle control. If the seat isn't engaged, it may move unexpectedly. Ensure adjustments are made before driving."
+    },
+    {
+        "q": "How should seats be adjusted for safety?",
+        "a": "Set the backrest to a near-vertical position, sit upright, ensure arms are slightly bent when holding the steering wheel, and maintain a distance to fully depress pedals."
+    },
+    {
+        "q": "How do you operate a suspension seat?",
+        "a": "A reservoir pressure of at least 7 bar is required. Use the EASY-ENTRY/EXIT feature to lower fully. Adjust height, fore-and-aft, backrest, and oscillation damper with the respective levers."
+    },
+    {
+        "q": "What are the risks of using a bed while the vehicle is in motion?",
+        "a": "A vehicle occupant on the bed while the vehicle is in motion cannot be restrained, risking serious or fatal injuries. Only use the bed when the vehicle is stationary."
+    },
+    {
+        "q": "How do you fold down or up an upper bed in an L cab?",
+        "a": "To fold down: adjust or fold the seat backrests forward, lift the bed slightly, press release buttons on buckles, pull out lower belt tongues, and swing the bed down. To fold up: fold the bed up and press lower belt tongues into buckles until they engage."
+    },
+    {
+        "q": "How do you fold down or up a standard berth in an M cab?",
+        "a": "To fold down: press the bed against the rear wall, press and hold the lock, unclip the retainer band, release the lock, and swing the bed down. To fold up: lower the head section fully, fold the bed up, press the retainer band towards the lock."
+    },
+    {
+        "q": "How do you adjust the multifunction steering wheel?",
+        "a": "Stop the vehicle, apply the parking brake, step on and hold the yellow button in the driver's footwell to unlock the steering column, adjust the height and angle, then release the button to lock it."
+    },
+    {
+        "q": "What should you know about adjusting external mirrors?",
+        "a": "Exterior mirrors reduce image size, making objects appear farther than they are. Always check their position before driving and look over your shoulder to confirm distances."
+    },
+    {
+        "q": "How do you adjust the exterior mirrors?",
+        "a": "Press the mirror button forwards, backwards, right, or left until the exterior mirror is correctly set. To swing to manoeuvring position, press the manoeuvre button."
+    },
+    {
+        "q": "How do you operate the exterior mirror heating?",
+        "a": "Switch the ignition lock to the drive position. Press the heating button to switch mirror heating on or off. When the indicator lamp lights up, heating is active."
+    },
+    {
+        "q": "What are the functions of the light switch?",
+        "a": "The light switch controls automatic headlamp mode, daytime driving lights, lights off, side/rear lamps, licence plate lighting, dipped-beam/main-beam headlamps, foglamps, and rear foglamp."
+    },
+    {
+        "q": "How do you turn on the dipped-beam headlamps?",
+        "a": "Turn the light switch to the L position. The dipped-beam headlamps and side lamps activate, and the indicator lamp in the instrument cluster lights up."
+    },
+    {
+        "q": "How do daytime driving lights work?",
+        "a": "Start the engine and turn the light switch to the daytime position. Daytime driving lights activate and turn off when dipped-beam headlamps are switched on."
+    },
+    {
+        "q": "What are the risks of automatic headlamp mode?",
+        "a": "Dipped-beam headlamps may not switch on automatically in fog, snow, or poor visibility. Turn the switch to the L position in such conditions. The driver is responsible for lighting at all times."
+    },
+    {
+        "q": "How do you operate foglamps and rear foglamp?",
+        "a": "Turn the light switch to T or L. Pull it to position 5 for foglamps, or to position 6 for front and rear foglamps."
+    },
+    {
+        "q": "How does headlamp range control work?",
+        "a": "Adjust the headlamp range control to match the vehicle's load. Set to the unladen position when unladen. For a laden vehicle, turn to a position where the road is illuminated 40 m to 100 m without dazzling oncoming traffic."
+    },
+    {
+        "q": "How do you control the interior lighting?",
+        "a": "Briefly press the interior light button to switch on/off and dim interior lights (0-100% brightness). Press and hold to adjust brightness."
+    },
+    {
+        "q": "How do you use the nightlight and ambient lighting?",
+        "a": "For nightlight (green), press the upper section of the switch to turn on. For ambient lighting (blue), briefly press the button to toggle on/off, or hold to dim."
+    },
+    {
+        "q": "Who is the CFO of Nissan?",
+        "aliases": [
+            "Who is CFO of Nissan?",
+            "Who is Nissan CFO?",
+            "Nissan CFO"
+        ],
+        "a": "George Leondis"
+    },
+    {
+        "q": "Who is CFO of Mitsubishi?",
+        "aliases": [
+            "Who is the CFO of Mitsubishi?",
+            "Who is CFO of Mitsubishi Motors Corporation?",
+            "Mitsubishi CFO"
+        ],
+        "a": "Kentaro Matsuoka"
+    }
+]

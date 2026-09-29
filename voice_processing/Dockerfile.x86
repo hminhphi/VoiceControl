@@ -1,0 +1,87 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# voice_processing — x86_64 / amd64 + NVIDIA GPU
+#
+# Kế thừa từ x86-base (CUDA 12.6, PyTorch 2.6, ONNX GPU, sherpa-onnx).
+# Chạy trên máy host amd64 thay thế l4t-jetpack.
+#
+# Build:
+#   docker compose -f docker-compose.x86.yml build voice_processing
+# ============================================================
+ARG BASE_IMAGE=orchestrator-on-edge/x86-base:cu128
+FROM ${BASE_IMAGE}
+
+ENV PYTHONPATH=/app
+ENV XDG_CACHE_HOME=/app/cache
+
+WORKDIR /app
+
+# ── 1. Audio Python packages ──────────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        sounddevice==0.5.1 \
+        PyAudio \
+        pydub \
+        python-dotenv \
+        colorlog \
+        requests \
+        websocket-client
+
+# ── 2. silero-vad + webrtcvad ─────────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        silero-vad==5.1.2 \
+        webrtcvad
+
+# ── 3. Wake word (openwakeword) ───────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install openwakeword==0.5.1
+
+# ── 4. STT backends ───────────────────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-build-isolation \
+        openai-whisper==20240927 \
+    && python3 -m pip install \
+        "transformers>=5.13.0" \
+        accelerate \
+        safetensors \
+        librosa
+
+# ── 5. TTS (Kokoro ONNX — x86 compatible) ────────────────────
+# kokoro-onnx works on x86_64; espeak-ng provides phonemization
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        espeak-ng libespeak-ng-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "espeakng-loader>=0.2.4" \
+        "phonemizer-fork>=3.3.2" \
+        kokoro-onnx
+
+# ── 6. torch2trt NOT needed on x86 ───────────────────────────
+# whisper_trt uses TRT — not available on non-Jetson.
+# We use whisper (CPU/CUDA) or sherpa-onnx instead.
+
+# ── 7. Application source ─────────────────────────────────────
+COPY voice_processing/ /app/
+
+# ── 8. Silero VAD ONNX model asset ────────────────────────────
+# If the model is already in agent_assets/models (from host volume),
+# this step is a no-op safety copy.
+RUN mkdir -p /app/agent_assets/models \
+    && python3 -c "\
+import silero_vad, os, shutil; \
+src = os.path.join(os.path.dirname(silero_vad.__file__), 'data', 'silero_vad.onnx'); \
+dest = '/app/agent_assets/models/silero_vad.onnx'; \
+shutil.copy(src, dest) if not os.path.isfile(dest) else print('[setup] already exists'); \
+print('[setup] silero_vad.onnx →', dest)"
+
+# ── 9. Download sherpa-onnx models (optional at build time) ───
+ARG SHERPA_DOWNLOAD_MODELS=0
+RUN if [ "$SHERPA_DOWNLOAD_MODELS" = "1" ] && [ -f /app/download_models.py ]; then \
+        python3 /app/download_models.py; \
+    fi
+
+CMD ["python3", "main.py"]

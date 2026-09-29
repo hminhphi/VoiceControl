@@ -1,0 +1,19 @@
+[Unit]
+Description=Orchestrator-on-edge (run_all.sh)
+Wants=network-online.target docker.service bluetooth.service
+After=network-online.target docker.service bluetooth.service
+
+[Service]
+Type=simple
+User=nvidia
+WorkingDirectory=/home/nvidia/fa_ai/orchestrator-on-edge
+EnvironmentFile=-/home/nvidia/fa_ai/orchestrator-on-edge/.env
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+ExecStartPre=+/home/nvidia/fa_ai/orchestrator-on-edge/self_heal.sh
+ExecStartPre=/bin/sleep 30
+ExecStart=/home/nvidia/fa_ai/orchestrator-on-edge/run_all.sh
+Restart=on-failure
+RestartSec=15
+[Install]
+WantedBy=multi-user.target

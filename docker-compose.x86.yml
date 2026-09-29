@@ -1,0 +1,290 @@
+# ============================================================
+# docker-compose.x86.yml — x86_64 / amd64 + NVIDIA GPU
+#
+# Dùng thay thế docker-compose.yml khi chạy trên máy host amd64.
+# GPU: RTX 5060 Ti (16GB VRAM) — CUDA 12.6
+#
+# Khởi động nhanh (chỉ voice + orchestrator):
+#   docker compose -f docker-compose.x86.yml up -d
+#
+# Build base image trước:
+#   docker build -f Dockerfile.x86-base -t orchestrator-on-edge/x86-base:cu128 .
+#
+# Khác biệt so với docker-compose.yml (Jetson):
+#   - Base image: x86-base:cu128 thay vì l4t-base:r36.4.0-torch2.8
+#   - Không mount /usr/lib/aarch64-linux-gnu/tegra (không tồn tại trên x86)
+#   - voice_processing dùng Dockerfile.x86
+#   - agents dùng Dockerfile.x86 với pyproject.x86.toml
+#   - Audio: PulseAudio qua socket hoặc ALSA trực tiếp
+#   - STT_BACKEND mặc định: sherpa_onnx (không cần TRT)
+# ============================================================
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+
+x-gpu-base: &gpu-base
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-x86-base-image: &x86-base-image
+  args:
+    BASE_IMAGE: orchestrator-on-edge/x86-base:cu128
+
+services:
+  # ── Orchestrator ───────────────────────────────────────────
+  orchestrator:
+    build: ./orchestrator
+    logging: *default-logging
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - ORCHESTRATOR_PORT=${ORCHESTRATOR_PORT:-8000}
+      - AGENT_URLS=${AGENT_URLS:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:8080/v1}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-google/gemma-4-e2b}
+      - ORCHESTRATOR_ROUTING_MODEL=${ORCHESTRATOR_ROUTING_MODEL:-}
+      - GRAPHQL_HOST=${GRAPHQL_HOST:-}
+      - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
+      - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
+      - HF_HOME=/app/cache
+    depends_on:
+      car_control:
+        condition: service_healthy
+      car_manual:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./orchestrator:/app
+      - ./cache/orchestrator:/app/cache
+
+  # ── Car Control Agent ──────────────────────────────────────
+  car_control:
+    build:
+      context: .
+      dockerfile: agents/car_control/Dockerfile.x86
+      <<: *x86-base-image
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./shared/car_control:/app/sounds
+      - ./agents/car_control:/app
+      - ./cache/car_control:/app/cache
+    command: python3 main_pc.py
+    environment:
+      - HF_HOME=/app/cache
+      - CAR_SIMULATOR_CONNECTED=${CAR_SIMULATOR_CONNECTED:-true}
+      - CAR_CONTROL_ENABLE_STATE_API=1
+      - CAR_CONTROL_BASE_URL=http://car_control:8001
+      - CAR_CONTROL_SOUNDS_DIR=${CAR_CONTROL_SOUNDS_DIR:-/app/sounds}
+      - GRAPHQL_HOST=${GRAPHQL_HOST:-}
+      - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
+      - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
+
+  # ── Car Manual Agent ───────────────────────────────────────
+  car_manual:
+    build:
+      context: .
+      dockerfile: agents/car_manual/Dockerfile.x86
+      <<: *x86-base-image
+    logging: *default-logging
+    <<: *gpu-base
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+    environment:
+      - HF_HOME=/app/cache
+      - CAR_MANUAL_BRAND=${CAR_MANUAL_BRAND:-mmc,toyota}
+      - CAR_MANUAL_SEARCH_MODE=${CAR_MANUAL_SEARCH_MODE:-embedding}
+      - CAR_MANUAL_EMBEDDING_MODEL=${CAR_MANUAL_EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
+      - CAR_MANUAL_TOP_K=${CAR_MANUAL_TOP_K:-3}
+      - CAR_MANUAL_SCORE_THRESHOLD=${CAR_MANUAL_SCORE_THRESHOLD:-0.2}
+      - CAR_MANUAL_BASE_URL=http://car_manual:8002
+    volumes:
+      - ./agents/car_manual:/app
+      - ./cache/car_manual:/app/cache
+      - ./cache/orchestrator/hub/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2:/app/cache/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2:ro
+    command: python3 main.py
+
+  # ── Voice Processing ───────────────────────────────────────
+  voice_processing:
+    build:
+      context: .
+      dockerfile: voice_processing/Dockerfile.x86
+      args:
+        BASE_IMAGE: orchestrator-on-edge/x86-base:cu128
+    image: orchestrator-on-edge/voice_processing-x86:latest
+    container_name: voice_processing
+    logging: *default-logging
+    <<: *gpu-base
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      # Audio device — trên x86 host dùng PulseAudio socket hoặc /dev/snd trực tiếp
+      - MIC_DEVICE_NAME=${MIC_DEVICE_NAME:-default}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHUNK=${AUDIO_CHUNK:-1024}
+      - AUDIO_LATENCY=${AUDIO_LATENCY:-0.10}
+      - AUDIO_STATUS_LOG_INTERVAL=${AUDIO_STATUS_LOG_INTERVAL:-2.0}
+      # Thread limits (x86 có nhiều core hơn Jetson — tăng lên 2)
+      - OMP_NUM_THREADS=${OMP_NUM_THREADS:-2}
+      - OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-2}
+      - MKL_NUM_THREADS=${MKL_NUM_THREADS:-2}
+      - NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-2}
+      - OMP_WAIT_POLICY=${OMP_WAIT_POLICY:-PASSIVE}
+      - ORT_INTRA_OP_NUM_THREADS=${ORT_INTRA_OP_NUM_THREADS:-2}
+      - ORT_INTER_OP_NUM_THREADS=${ORT_INTER_OP_NUM_THREADS:-1}
+      - TORCH_NUM_THREADS=${TORCH_NUM_THREADS:-2}
+      - TORCH_NUM_INTEROP_THREADS=${TORCH_NUM_INTEROP_THREADS:-1}
+      # PulseAudio (nếu dùng PA socket từ host)
+      - PULSE_SERVER=${PULSE_SERVER:-}
+      - PULSE_SOURCE=${PULSE_SOURCE:-}
+      - PULSE_SINK=${PULSE_SINK:-}
+      - PULSE_LATENCY_MSEC=${PULSE_LATENCY_MSEC:-100}
+      # Orchestrator
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
+      - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
+      - TTS_LANGUAGE=${TTS_LANGUAGE:-en}
+      # STT — sherpa_onnx là default tốt nhất cho x86 offline
+      - STT_BACKEND=${STT_BACKEND:-sherpa_onnx}
+      - STT_MODEL=${STT_MODEL:-small.en}
+      - STT_LANGUAGE=${STT_LANGUAGE:-en}
+      - STT_MODEL_DIR=${STT_MODEL_DIR:-/app/agent_assets/models/asr}
+      - STT_MODEL_TYPE=${STT_MODEL_TYPE:-sense_voice}
+      # Wake word
+      - WAKE_WORD_BACKEND=${WAKE_WORD_BACKEND:-openwakeword}
+      - WAKE_WORD_MODEL_DIR=${WAKE_WORD_MODEL_DIR:-/app/agent_assets/models/kws}
+      - WAKE_WORD_THRESHOLD=${WAKE_WORD_THRESHOLD:-0.5}
+      # AEC (webrtc_apm, lib có sẵn trong image)
+      - AEC_ENABLED=${AEC_ENABLED:-1}
+      - AEC_DELAY_MS=${AEC_DELAY_MS:-60}
+      - AEC_NOISE_SUPPRESS=${AEC_NOISE_SUPPRESS:-1}
+      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-high}
+      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-1}
+      # AGC2 adaptive digital + pre-amp (mic yếu)
+      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-1}
+      - AEC_AGC_HEADROOM_DB=${AEC_AGC_HEADROOM_DB:-5.0}
+      - AEC_AGC_MAX_GAIN_DB=${AEC_AGC_MAX_GAIN_DB:-30.0}
+      - AEC_AGC_INITIAL_GAIN_DB=${AEC_AGC_INITIAL_GAIN_DB:-15.0}
+      - AEC_AGC_MAX_SPEED_DB=${AEC_AGC_MAX_SPEED_DB:-12.0}
+      - AEC_AGC_MAX_NOISE_DBFS=${AEC_AGC_MAX_NOISE_DBFS:--50.0}
+      - AEC_PRE_GAIN=${AEC_PRE_GAIN:-1.0}
+      # VAD thresholds
+      - VAD_THRESHOLD_HIGH=${VAD_THRESHOLD_HIGH:-0.55}
+      - VAD_THRESHOLD_LOW=${VAD_THRESHOLD_LOW:-0.20}
+      # Turn-taking (pause chốt segment / kết thúc turn)
+      - SEGMENT_SILENCE=${SEGMENT_SILENCE:-1.0}
+      - TURN_END_SILENCE=${TURN_END_SILENCE:-2.5}
+      - VAD_FIRST_TIMEOUT=${VAD_FIRST_TIMEOUT:-8.0}
+      - VAD_DETECT_THRESHOLD=${VAD_DETECT_THRESHOLD:-0.55}
+      # Follow-up không cần wake-word sau khi TTS trả lời
+      - FOLLOWUP_LISTEN_SEC=${FOLLOWUP_LISTEN_SEC:-12.0}
+      - FOLLOWUP_GRACE_SEC=${FOLLOWUP_GRACE_SEC:-0.2}
+      - SPEECH_PREROLL_SEC=${SPEECH_PREROLL_SEC:-0.8}
+      # Barge-in: ngắt TTS khi user nói chen
+      - BARGE_IN_ENABLED=${BARGE_IN_ENABLED:-1}
+      - BARGE_IN_MIN_PLAY_SEC=${BARGE_IN_MIN_PLAY_SEC:-1.0}
+      # Cloud STT (optional)
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_STT_MODEL=${OPENAI_STT_MODEL:-gpt-4o-transcribe}
+      - OPENAI_STT_TIMEOUT=${OPENAI_STT_TIMEOUT:-20}
+      - OPENAI_STT_PROMPT=${OPENAI_STT_PROMPT:-}
+      - OPENAI_TRANSCRIPTIONS_URL=${OPENAI_TRANSCRIPTIONS_URL:-https://api.openai.com/v1/audio/transcriptions}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - ELEVENLABS_STT_MODEL=${ELEVENLABS_STT_MODEL:-scribe_v2_realtime}
+      - ELEVENLABS_STT_URL=${ELEVENLABS_STT_URL:-wss://api.elevenlabs.io/v1/speech-to-text/realtime}
+      - ELEVENLABS_STT_TIMEOUT=${ELEVENLABS_STT_TIMEOUT:-20}
+      - ELEVENLABS_STT_INCLUDE_TIMESTAMPS=${ELEVENLABS_STT_INCLUDE_TIMESTAMPS:-false}
+      - ELEVENLABS_STT_NO_VERBATIM=${ELEVENLABS_STT_NO_VERBATIM:-false}
+      - ELEVENLABS_STT_COMMIT_STRATEGY=${ELEVENLABS_STT_COMMIT_STRATEGY:-manual}
+      - NEMOTRON_MODEL_ID=${NEMOTRON_MODEL_ID:-nvidia/nemotron-speech-streaming-en-0.6b}
+    volumes:
+      - ./voice_processing/output:/app/output
+      - ./voice_processing/input_test:/app/input_test
+      - ./voice_processing:/app
+      - ./cache/voice_processing:/app/cache
+      # Audio: bind PulseAudio socket từ host Windows (Docker Desktop WSL2)
+      # Uncomment nếu dùng PulseAudio:
+      # - ${XDG_RUNTIME_DIR:-/run/user/1000}/pulse:/run/pulse:ro
+      # - ${HOME}/.config/pulse/cookie:/root/.config/pulse/cookie:ro
+    devices:
+      # Bind /dev/snd để dùng ALSA trực tiếp (Docker Desktop WSL2)
+      - /dev/snd:/dev/snd
+    group_add:
+      - audio
+    network_mode: host
+    privileged: true
+    stdin_open: true
+    tty: true
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+  # ── Frontend (optional) ────────────────────────────────────
+  frontend:
+    profiles: ["optional"]
+    build:
+      context: ./frontend/client
+      dockerfile: Dockerfile
+    logging: *default-logging
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/client:/app
+      - /app/node_modules
+    environment:
+      - VITE_ORCHESTRATOR_URL=http://localhost:${ORCHESTRATOR_PORT:-8000}
+      - PROXY_ORCHESTRATOR_URL=http://orchestrator:${ORCHESTRATOR_PORT:-8000}
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+  # ── Car Control Simulation UI ─────────────────────────────
+  car_control_ui:
+    build:
+      context: ./car_control_ui
+      dockerfile: Dockerfile
+    logging: *default-logging
+    ports:
+      - "8010:8010"
+    environment:
+      - CAR_CONTROL_URL=http://car_control:8001
+      - ORCHESTRATOR_URL=http://orchestrator:8000
+      - CAR_CONTROL_UI_PORT=8010
+    volumes:
+      - ./car_control_ui:/app
+    depends_on:
+      car_control:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy

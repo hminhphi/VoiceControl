@@ -1,0 +1,187 @@
+[
+  {
+    "q": "Who is CFO of Toyota Motor Corporation?",
+    "aliases": [
+      "Who is the CFO of Toyota Motor Corporation?",
+      "Who is CFO of Toyota?",
+      "Who is the CFO of Toyota?",
+      "Who is the CFO of the car brand Toyota?",
+      "Toyota CFO"
+    ],
+    "a": "Yoichi Miyazaki",
+    "tags": [
+      "toyota",
+      "cfo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CIO of Toyota Motor Corporation?",
+    "aliases": [
+      "Who is the CIO of Toyota Motor Corporation?",
+      "Who is CIO of Toyota?",
+      "Who is the CIO of Toyota?",
+      "Who is the CIO of the car brand Toyota?",
+      "Toyota CIO"
+    ],
+    "a": "Koji Sato. Note: Toyota's CIO here means Chief Industry Officer, not Chief Information Officer.",
+    "tags": [
+      "toyota",
+      "cio",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CFO of Nissan?",
+    "aliases": [
+      "Who is the CFO of Nissan?",
+      "Who is Nissan CFO?",
+      "Who is CFO of Nissan Motor Corporation?",
+      "Who is the CFO of Nissan Motor Corporation?",
+      "Who is the CFO of the car brand Nissan?",
+      "Nissan CFO"
+    ],
+    "a": "George Leondis",
+    "tags": [
+      "nissan",
+      "cfo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CIO of Nissan?",
+    "aliases": [
+      "Who is the CIO of Nissan?",
+      "Who is Nissan CIO?",
+      "Who is CIO of Nissan Motor Corporation?",
+      "Who is the CIO of Nissan Motor Corporation?",
+      "Who is the CIO of the car brand Nissan?",
+      "Nissan CIO"
+    ],
+    "a": "I don't know. Nissan's official 2026 executive page lists CEO, CFO, and CTO, but not a current CIO.",
+    "tags": [
+      "nissan",
+      "cio",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CFO of Mitsubishi Motors Corporation?",
+    "aliases": [
+      "Who is CFO of Mitsubishi?",
+      "Who is the CFO of Mitsubishi?",
+      "Who is the CFO of the car brand Mitsubishi?",
+      "Mitsubishi CFO",
+      "Who is CFO of Mitsu?",
+      "Who is the CFO of Mitsu?",
+      "Mitsu CFO"
+    ],
+    "a": "Kentaro Matsuoka",
+    "tags": [
+      "mitsubishi",
+      "mitsu",
+      "cfo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CIO of Mitsubishi?",
+    "aliases": [
+      "Who is the CIO of Mitsubishi?",
+      "Who is the CIO of the car brand Mitsubishi?",
+      "Who is CIO Mitsubishi?",
+      "Who is the IO of Mitsubishi?",
+      "Mitsubishi CIO",
+      "Who is CIO of Mitsu?",
+      "Who is the CIO of Mitsu?",
+      "Mitsu CIO"
+    ],
+    "a": "Hideki Shibata, Corporate Officer, CIO, Division General Manager, Global IT Division.",
+    "tags": [
+      "mitsubishi",
+      "mitsu",
+      "cio",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CFO of Honda Motor Co., Ltd.?",
+    "aliases": [
+      "Who is the CFO of Honda Motor Co., Ltd.?",
+      "Who is CFO of Honda?",
+      "Who is the CFO of Honda?",
+      "Who is the CFO of the car brand Honda?",
+      "Honda CFO"
+    ],
+    "a": "Eiji Fujimura",
+    "tags": [
+      "honda",
+      "cfo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CIO of Honda Motor Co., Ltd.?",
+    "aliases": [
+      "Who is the CIO of Honda Motor Co., Ltd.?",
+      "Who is CIO of Honda?",
+      "Who is the CIO of Honda?",
+      "Who is the CIO of the car brand Honda?",
+      "Honda CIO"
+    ],
+    "a": "I don't know. Honda's official pages show CEO and CFO, but I did not find a current global CIO.",
+    "tags": [
+      "honda",
+      "cio",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CEO of DENSO Corporation?",
+    "aliases": [
+      "Who is the CEO of DENSO Corporation?",
+      "Who is CEO of DENSO?",
+      "Who is the CEO of DENSO?",
+      "Who is the CEO of the car brand DENSO?",
+      "DENSO CEO"
+    ],
+    "a": "Shinnosuke Hayashi",
+    "tags": [
+      "denso",
+      "ceo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CFO of DENSO Corporation?",
+    "aliases": [
+      "Who is the CFO of DENSO Corporation?",
+      "Who is CFO of DENSO?",
+      "Who is the CFO of DENSO?",
+      "Who is the CFO of the car brand DENSO?",
+      "DENSO CFO"
+    ],
+    "a": "Seiji Maeda",
+    "tags": [
+      "denso",
+      "cfo",
+      "executive"
+    ]
+  },
+  {
+    "q": "Who is CIO of DENSO Corporation?",
+    "aliases": [
+      "Who is the CIO of DENSO Corporation?",
+      "Who is CIO of DENSO?",
+      "Who is the CIO of DENSO?",
+      "Who is the CIO of the car brand DENSO?",
+      "DENSO CIO"
+    ],
+    "a": "I don't know. DENSO lists CTO, CDO, and Chief Software Officer, but not CIO.",
+    "tags": [
+      "denso",
+      "cio",
+      "executive"
+    ]
+  }
+]

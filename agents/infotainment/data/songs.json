@@ -1,0 +1,5 @@
+[
+  {"id": "song1", "title": "Morning Drive", "path": "morning_drive.wav"},
+  {"id": "song2", "title": "Highway Blues", "path": "highway_blues.wav"},
+  {"id": "song3", "title": "Sunset Cruise", "path": "sunset_cruise.wav"}
+]

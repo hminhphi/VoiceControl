@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""
+fetch_assets.py — download the large/derived assets that are NOT tracked in git.
+
+Everything this script fetches is listed in docs/ASSETS.md. Assets that are
+small and custom (wake-word .onnx, silero_vad.onnx) ARE tracked in git and only
+verified here.
+
+Usage (from the repo root):
+    python scripts/fetch_assets.py --all
+    python scripts/fetch_assets.py llm embed kokoro sherpa wheels
+    python scripts/fetch_assets.py verify
+
+Subcommands:
+    llm      Qwen3.5-4B Q4_K_M GGUF         -> llama-cpp/models/
+    embed    sentence-transformers MiniLM   -> cache/orchestrator/hub/
+    kokoro   Kokoro v1.0 ONNX + voices      -> voice_processing/kokoro_tts/
+    sherpa   SenseVoice ASR + KWS (delegates to voice_processing/download_models.py)
+    wheels   Jetson aarch64 wheels          -> voice_processing/wheels/
+    silero   nothing to download (tracked)  -> verifies silero_vad.onnx
+    verify   check every expected asset exists
+
+Environment:
+    HF_TOKEN        HuggingFace token (only needed for gated/private repos)
+    WHEELS_INDEX    override the Jetson wheel index (default below)
+
+Idempotent: existing files are skipped. Downloads use a .part temp file and are
+atomically renamed, so a partial download never looks complete.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# ── Asset specifications ──────────────────────────────────────────────────────
+GGUF_REPO = "unsloth/Qwen3.5-4B-GGUF"
+GGUF_FILE = "Qwen3.5-4B-Q4_K_M.gguf"
+GGUF_DIR = ROOT / "llama-cpp" / "models"
+
+EMBED_REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+EMBED_CACHE = ROOT / "cache" / "orchestrator" / "hub"
+
+KOKORO_REPO = "mikkoph/kokoro-onnx"  # HF mirror of thewh1teagle/kokoro-onnx releases
+KOKORO_DIR = ROOT / "voice_processing" / "kokoro_tts"
+KOKORO_FILES = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
+
+WHEELS_DIR = ROOT / "voice_processing" / "wheels"
+# torch/torchvision/torchaudio 2.8.0 for JetPack 6 (aarch64) from the Jetson index
+WHEELS_INDEX = os.environ.get("WHEELS_INDEX", "https://pypi.jetson-ai-lab.io/jp6/cu126")
+WHEELS_PIP = [
+    ("torch", "2.8.0"),
+    ("torchvision", "0.23.0"),
+    ("torchaudio", "2.8.0"),
+]
+# onnxruntime-gpu has no aarch64 wheel on PyPI; use the community build.
+ORT_URL = (
+    "https://github.com/guyin24/onnxruntime-gpu-for-jetson/releases/download/"
+    "v1.24.4/onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl"
+)
+ORT_SHA256 = "eb64c57f89f8d152e328227e118c9a36537d3cd6e1bbd3ed4781f83238835c74"
+ORT_NAME = "onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl"
+
+ASSETS_ROOT = ROOT / "voice_processing" / "agent_assets" / "models"
+SHERPA_DIR = ASSETS_ROOT
+DOWNLOAD_MODELS = ROOT / "voice_processing" / "download_models.py"
+
+# sherpa-onnx KWS (wake word) — upstream tar ships epoch-suffixed filenames,
+# while the runtime (wake_word.py) expects encoder.onnx/decoder.onnx/joiner.onnx.
+KWS_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+    "kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
+)
+KWS_KEYWORDS = "hey dora @1.8\ndola @1.8\n"
+
+# ── Verification expectations ─────────────────────────────────────────────────
+EXPECTED = [
+    (GGUF_DIR / GGUF_FILE, 2_740_937_888),
+    (KOKORO_DIR / "kokoro-v1.0.onnx", 300_000_000),
+    (KOKORO_DIR / "voices-v1.0.bin", 27_553_100),
+    (ASSETS_ROOT / "asr" / "model.int8.onnx", 200_000_000),
+    (ASSETS_ROOT / "asr" / "tokens.txt", None),
+    (ASSETS_ROOT / "kws" / "encoder.onnx", None),
+    (ASSETS_ROOT / "silero_vad.onnx", None),          # tracked in git
+    (ASSETS_ROOT / "hey_doh_ra.onnx", None),          # tracked in git
+    (WHEELS_DIR / "torch-2.8.0-cp310-cp310-linux_aarch64.whl", None),
+    (WHEELS_DIR / "torchvision-0.23.0-cp310-cp310-linux_aarch64.whl", None),
+    (WHEELS_DIR / "torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl", None),
+    (WHEELS_DIR / ORT_NAME, None),
+]
+
+
+def log(msg: str) -> None:
+    print(f"[fetch_assets] {msg}", flush=True)
+
+
+def _rel(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+# ── Generic helpers ───────────────────────────────────────────────────────────
+def _urlopen(url: str):
+    req = urllib.request.Request(url, headers={"User-Agent": "orchestrator-on-edge/fetch_assets"})
+    token = os.environ.get("HF_TOKEN")
+    if token and "huggingface.co" in url:
+        req.add_header("Authorization", f"Bearer {token}")
+    return urllib.request.urlopen(req)
+
+
+def download_url(url: str, dest: Path, sha256: str | None = None) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and (sha256 is None or _sha256(dest) == sha256):
+        log(f"skip (exists): {_rel(dest)}")
+        return dest
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    log(f"download: {url}")
+    with _urlopen(url) as r, open(tmp, "wb") as f:
+        shutil.copyfileobj(r, f, length=1024 * 1024)
+
+    if sha256 and _sha256(tmp) != sha256:
+        tmp.unlink(missing_ok=True)
+        raise SystemExit(f"sha256 mismatch for {dest.name}")
+    tmp.replace(dest)
+    log(f"  -> {_rel(dest)}")
+    return dest
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hf_download(repo: str, filename: str, dest: Path) -> Path:
+    """Download a single file from a public HF repo (falls back to direct URL)."""
+    if dest.exists():
+        log(f"skip (exists): {_rel(dest)}")
+        return dest
+    try:
+        from huggingface_hub import hf_hub_download  # type: ignore
+
+        tmp = hf_hub_download(repo_id=repo, filename=filename, token=os.environ.get("HF_TOKEN"))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(tmp, dest)
+        log(f"  -> {_rel(dest)} (hf_hub_download)")
+        return dest
+    except ImportError:
+        url = f"https://huggingface.co/{repo}/resolve/main/{filename}?download=true"
+        return download_url(url, dest)
+
+
+# ── Subcommands ───────────────────────────────────────────────────────────────
+def fetch_llm() -> None:
+    log(f"LLM GGUF: {GGUF_REPO}:{GGUF_FILE}")
+    hf_download(GGUF_REPO, GGUF_FILE, GGUF_DIR / GGUF_FILE)
+
+
+def fetch_embed() -> None:
+    log(f"embedding model: {EMBED_REPO}")
+    if not (EMBED_CACHE / f"models--{EMBED_REPO.replace('/', '--')}").exists():
+        try:
+            from huggingface_hub import snapshot_download  # type: ignore
+        except ImportError:
+            raise SystemExit(
+                "huggingface_hub is required for the embedding model.\n"
+                "  pip install 'huggingface_hub>=0.23'"
+            )
+        snapshot_download(
+            repo_id=EMBED_REPO,
+            cache_dir=str(EMBED_CACHE),
+            token=os.environ.get("HF_TOKEN"),
+        )
+    log(f"  -> {(EMBED_CACHE / f'models--{EMBED_REPO.replace(chr(47), chr(45)*2)}')}")
+    # car_manual mounts cache/orchestrator/hub/... directly; nothing else to do.
+
+
+def fetch_kokoro() -> None:
+    log(f"Kokoro TTS: {KOKORO_REPO}")
+    for fn in KOKORO_FILES:
+        hf_download(KOKORO_REPO, fn, KOKORO_DIR / fn)
+
+
+def fetch_sherpa() -> None:
+    log("sherpa-onnx ASR (via voice_processing/download_models.py)")
+    if not DOWNLOAD_MODELS.exists():
+        raise SystemExit(f"missing {DOWNLOAD_MODELS}")
+
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    env["SKIP_KWS"] = "1"  # KWS is handled below (fixes upstream filename mismatch)
+    if (ASSETS_ROOT / "asr" / "model.int8.onnx").exists():
+        env["SKIP_ASR"] = "1"
+    subprocess.check_call(
+        [sys.executable, str(DOWNLOAD_MODELS), "--model-dir", str(SHERPA_DIR)],
+        env=env,
+    )
+    fetch_sherpa_kws()
+
+
+def _kws_pick(folder: Path, role: str) -> Path | None:
+    cands = [f for f in folder.glob(f"{role}*.onnx") if ".int8." not in f.name]
+    if not cands:
+        cands = sorted(folder.glob(f"{role}*.onnx"))
+    return cands[0] if cands else None
+
+
+def fetch_sherpa_kws() -> None:
+    kws_dir = ASSETS_ROOT / "kws"
+    if (kws_dir / "encoder.onnx").exists() and (kws_dir / "joiner.onnx").exists():
+        log("KWS already present")
+        return
+
+    log("KWS wake word model (sherpa-onnx zipformer gigaspeech)")
+    kws_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as td:
+        archive = Path(td) / "kws.tar.bz2"
+        download_url(KWS_URL, archive)
+        with tarfile.open(archive, "r:bz2") as tar:
+            tar.extractall(td)
+
+        tokens = next(Path(td).rglob("tokens.txt"), None)
+        if tokens is None:
+            raise SystemExit("KWS archive did not contain tokens.txt")
+        src = tokens.parent
+        for role in ("encoder", "decoder", "joiner"):
+            picked = _kws_pick(src, role)
+            if picked is None:
+                raise SystemExit(f"KWS archive missing {role}*.onnx")
+            shutil.copy2(picked, kws_dir / f"{role}.onnx")
+            log(f"  -> kws/{role}.onnx  (from {picked.name})")
+        shutil.copy2(tokens, kws_dir / "tokens.txt")
+
+    kw = kws_dir / "keywords.txt"
+    if not kw.exists():
+        kw.write_text(KWS_KEYWORDS)
+        log(f"  -> kws/keywords.txt (default)")
+
+
+def fetch_silero() -> None:
+    dest = ASSETS_ROOT / "silero_vad.onnx"
+    if dest.exists():
+        log("silero_vad.onnx present (tracked in git)")
+        return
+    log("silero_vad.onnx missing — extracting from the silero-vad pip package")
+    try:
+        import silero_vad  # type: ignore
+    except ImportError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "silero-vad==5.1.2"])
+        import silero_vad  # type: ignore
+    src = Path(silero_vad.__file__).parent / "data" / "silero_vad.onnx"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    log(f"  -> {_rel(dest)}")
+
+
+def fetch_wheels() -> None:
+    WHEELS_DIR.mkdir(parents=True, exist_ok=True)
+    if not all((WHEELS_DIR / f"{n}-{v}-cp310-cp310-linux_aarch64.whl").exists() for n, v in WHEELS_PIP):
+        log(f"Jetson wheels (torch/torchvision/torchaudio) from {WHEELS_INDEX}")
+        cmd = [
+            sys.executable, "-m", "pip", "download",
+            *[f"{n}=={v}" for n, v in WHEELS_PIP],
+            "--index-url", WHEELS_INDEX,
+            "--platform", "linux_aarch64",
+            "--python-version", "3.10",
+            "--implementation", "cp",
+            "--abi", "cp310",
+            "--only-binary", ":all:",
+            "--no-deps",
+            "-d", str(WHEELS_DIR),
+        ]
+        subprocess.check_call(cmd)
+    else:
+        log("skip (exists): torch/torchvision/torchaudio wheels")
+
+    download_url(ORT_URL, WHEELS_DIR / ORT_NAME, sha256=ORT_SHA256)
+
+
+def verify() -> int:
+    missing = 0
+    log("verifying assets...")
+    for path, min_size in EXPECTED:
+        if not path.exists():
+            print(f"  MISSING  {path.relative_to(ROOT)}")
+            missing += 1
+        elif min_size and path.stat().st_size < min_size:
+            print(f"  TOO SMALL {path.relative_to(ROOT)} ({path.stat().st_size} < {min_size})")
+            missing += 1
+        else:
+            print(f"  ok       {path.relative_to(ROOT)}")
+    log(f"{'ALL OK' if not missing else f'{missing} asset(s) missing'} — see docs/ASSETS.md")
+    return 1 if missing else 0
+
+
+SUBCOMMANDS = {
+    "llm": fetch_llm,
+    "embed": fetch_embed,
+    "kokoro": fetch_kokoro,
+    "sherpa": fetch_sherpa,
+    "silero": fetch_silero,
+    "wheels": fetch_wheels,
+    "verify": verify,
+}
+ORDER = ["llm", "embed", "kokoro", "sherpa", "silero", "wheels"]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Download orchestrator-on-edge assets")
+    parser.add_argument("assets", nargs="*", choices=[*ORDER, "verify"],
+                        help="assets to fetch (default: verify)")
+    parser.add_argument("--all", action="store_true", help="fetch every downloadable asset")
+    args = parser.parse_args()
+
+    if args.all:
+        for name in ORDER:
+            SUBCOMMANDS[name]()
+        return verify()
+
+    targets = args.assets or ["verify"]
+    rc = 0
+    for name in targets:
+        result = SUBCOMMANDS[name]()
+        if isinstance(result, int):
+            rc = rc or result
+    if targets != ["verify"] and not args.all:
+        rc = rc or verify()
+    return rc
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

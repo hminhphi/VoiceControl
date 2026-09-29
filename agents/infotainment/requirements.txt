@@ -1,0 +1,8 @@
+a2a-sdk[http-server]==0.3.24
+uvicorn
+python-dotenv
+openai
+beautifulsoup4
+numpy
+torch
+transformers

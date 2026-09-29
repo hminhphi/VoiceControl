@@ -1,0 +1,22 @@
+{
+  "car_manual": {
+    "url": "http://car_manual:8002",
+    "enabled": true
+  },
+  "car_control": {
+    "url": "http://car_control:8001",
+    "enabled": true
+  },
+  "navigation": {
+    "url": "http://navigation:8003",
+    "enabled": false
+  },
+  "cloud": {
+    "url": "http://cloud:8005",
+    "enabled": false
+  },
+  "infotainment": {
+    "url": "http://infotainment:8004",
+    "enabled": false
+  }
+}

@@ -1,0 +1,496 @@
+[
+  {
+    "q": "What is Toyota Safety Sense 3.0 in the 2023 Toyota Corolla Cross?",
+    "a": "Toyota Safety Sense 3.0 is a suite of advanced safety features including Pre-Collision System, Lane Departure Alert, and Dynamic Radar Cruise Control."
+  },
+  {
+    "q": "How many airbags are in the 2023 Toyota Corolla Cross?",
+    "a": "It has nine airbags, including driver and passenger side, knee, rear side, and curtain airbags."
+  },
+  {
+    "q": "What does the Blind Spot Monitor do?",
+    "a": "It warns you of vehicles in your blind spots on either side of the Corolla Cross."
+  },
+  {
+    "q": "How does Rear Cross-Traffic Alert function?",
+    "a": "It detects approaching vehicles when reversing and provides audible and visual warnings."
+  },
+  {
+    "q": "What is the Pre-Collision System with Pedestrian Detection?",
+    "a": "It uses radar and cameras to detect vehicles and pedestrians, providing warnings and automatic braking if needed."
+  },
+  {
+    "q": "What is Lane Departure Alert with Steering Assist?",
+    "a": "It alerts you if you drift from your lane and provides gentle steering corrections."
+  },
+  {
+    "q": "How does Automatic High Beams work?",
+    "a": "It detects oncoming traffic and switches between high and low beams for better nighttime visibility."
+  },
+  {
+    "q": "What is Road Sign Assist in the Corolla Cross?",
+    "a": "It detects road signs like speed limits and displays them on the instrument panel."
+  },
+  {
+    "q": "What is Proactive Driving Assist?",
+    "a": "It provides braking and steering assistance to maintain safe distances and navigate curves."
+  },
+  {
+    "q": "What is the Star Safety System?",
+    "a": "A combination of Vehicle Stability Control, Traction Control, ABS, EBD, Brake Assist, and Smart Stop Technology."
+  },
+  {
+    "q": "What is the purpose of the LATCH system?",
+    "a": "Lower Anchors and Tethers for Children secures child safety seats easily."
+  },
+  {
+    "q": "Does the 2023 Corolla Cross have a child safety lock?",
+    "a": "Yes, it has child safety locks on rear doors to prevent opening from the inside."
+  },
+  {
+    "q": "What is Safety Connect in the Corolla Cross?",
+    "a": "A service with a 10-year trial offering emergency assistance, roadside help, and stolen vehicle location."
+  },
+  {
+    "q": "How does the Adaptive Front-Lighting System work?",
+    "a": "It adjusts headlights to follow the road when turning for better nighttime visibility."
+  },
+  {
+    "q": "What is Intelligent Clearance Sonar?",
+    "a": "It detects obstacles during parking and provides warnings to avoid collisions."
+  },
+  {
+    "q": "How does the emergency driving stop system function?",
+    "a": "It engages if the driver is unresponsive, slowing or stopping the vehicle."
+  },
+  {
+    "q": "What is the purpose of crumple zones in the Corolla Cross?",
+    "a": "They absorb impact energy during a collision to enhance passenger safety."
+  },
+  {
+    "q": "What are side-impact door beams?",
+    "a": "Reinforced beams in the doors to protect occupants during side collisions."
+  },
+  {
+    "q": "Does the Corolla Cross have an anti-theft system?",
+    "a": "Yes, it includes an engine immobilizer to prevent unauthorized starting."
+  },
+  {
+    "q": "What is the role of the backup camera?",
+    "a": "It displays a live feed of the area behind the vehicle to aid in reversing."
+  },
+  {
+    "q": "What is the Fully Digital Gauge Cluster?",
+    "a": "A 7-inch display showing real-time driving data, navigation, and safety alerts."
+  },
+  {
+    "q": "How does the Multi-Information Display (MID) work?",
+    "a": "It shows audio, navigation, and vehicle info like fuel efficiency and tire pressure."
+  },
+  {
+    "q": "What does the EV indicator signify in the hybrid model?",
+    "a": "It lights up when the vehicle is operating in electric-only mode."
+  },
+  {
+    "q": "What information does Service Connect provide?",
+    "a": "It offers vehicle health reports, maintenance alerts, and service reminders."
+  },
+  {
+    "q": "How can I view navigation data without looking away?",
+    "a": "The head-up display projects navigation and vehicle data onto the windshield."
+  },
+  {
+    "q": "What does the tire pressure monitoring system do?",
+    "a": "It alerts you when tire pressure is low for safer driving."
+  },
+  {
+    "q": "What does the Eco drive mode indicator show?",
+    "a": "It indicates when Eco drive mode is active for fuel-efficient driving."
+  },
+  {
+    "q": "How do I check fuel efficiency on the Corolla Cross?",
+    "a": "Use the Multi-Information Display to view real-time and average fuel economy."
+  },
+  {
+    "q": "What does the warning light for low fuel indicate?",
+    "a": "It alerts you when the fuel level is critically low."
+  },
+  {
+    "q": "What is the function of the oil pressure warning light?",
+    "a": "It warns of low engine oil pressure, indicating a potential issue."
+  },
+  {
+    "q": "What does the battery warning light mean?",
+    "a": "It signals a problem with the vehicle's charging system."
+  },
+  {
+    "q": "How does the brake system warning light function?",
+    "a": "It alerts you to issues with the braking system, requiring immediate attention."
+  },
+  {
+    "q": "What is the purpose of the maintenance reminder?",
+    "a": "It notifies you when scheduled maintenance is due."
+  },
+  {
+    "q": "What does the ABS warning light indicate?",
+    "a": "It signals a malfunction in the Anti-lock Brake System."
+  },
+  {
+    "q": "How do I know if the airbags are functional?",
+    "a": "The airbag warning light illuminates if there's an issue with the system."
+  },
+  {
+    "q": "What does the traction control light mean?",
+    "a": "It indicates when traction control is active or if there's a system issue."
+  },
+  {
+    "q": "What is the role of the vehicle stability control light?",
+    "a": "It shows when stability control is active or if there's a malfunction."
+  },
+  {
+    "q": "How can I monitor my speed on the Corolla Cross?",
+    "a": "Use the digital speedometer on the gauge cluster or head-up display."
+  },
+  {
+    "q": "What does the Lane Tracing Assist indicator show?",
+    "a": "It confirms when Lane Tracing Assist is active, keeping the vehicle centered."
+  },
+  {
+    "q": "What is the purpose of the parking brake indicator?",
+    "a": "It shows when the parking brake is engaged."
+  },
+  {
+    "q": "What should I check before driving the Corolla Cross?",
+    "a": "Check tire pressure, fluid levels, lights, and ensure all passengers are buckled."
+  },
+  {
+    "q": "How do I adjust the driver's seat?",
+    "a": "Use the 10-way power-adjustable controls to find your ideal position."
+  },
+  {
+    "q": "How do I set the mirrors before driving?",
+    "a": "Adjust side mirrors using the controls to eliminate blind spots."
+  },
+  {
+    "q": "What is the Smart Key System?",
+    "a": "It allows keyless entry and push-button start for convenience."
+  },
+  {
+    "q": "How do I use the parking brake?",
+    "a": "Press the button or lever on the center console to engage it."
+  },
+  {
+    "q": "Should I read the owner's manual before driving?",
+    "a": "Yes, it provides essential information on vehicle operation and safety."
+  },
+  {
+    "q": "How do I ensure child safety before driving?",
+    "a": "Secure children in appropriate safety seats using the LATCH system."
+  },
+  {
+    "q": "What is the purpose of checking the fuel level?",
+    "a": "Ensures you have enough fuel for your trip to avoid running out."
+  },
+  {
+    "q": "How do I adjust the steering wheel?",
+    "a": "Use the tilt and telescopic controls to position it comfortably."
+  },
+  {
+    "q": "What should I do if the vehicle smells of exhaust?",
+    "a": "Open windows and have it inspected by a Toyota dealer."
+  },
+  {
+    "q": "How do I check the brake fluid level?",
+    "a": "Inspect the reservoir under the hood; top up if below the minimum line."
+  },
+  {
+    "q": "What is the purpose of the hood latch check?",
+    "a": "Ensures the hood is securely closed to prevent it from opening while driving."
+  },
+  {
+    "q": "How do I verify the headlights are working?",
+    "a": "Turn on the headlights and check all beams with a walk-around."
+  },
+  {
+    "q": "What should I do with loose items before driving?",
+    "a": "Secure or store them to prevent distractions or hazards."
+  },
+  {
+    "q": "How do I activate the child safety locks?",
+    "a": "Set the switch on the rear doors to lock them from the inside."
+  },
+  {
+    "q": "What is the Eco drive mode in the Corolla Cross?",
+    "a": "It optimizes fuel efficiency by adjusting throttle and climate control."
+  },
+  {
+    "q": "How does All-Wheel Drive (AWD) help?",
+    "a": "It provides extra traction on slippery or rough roads."
+  },
+  {
+    "q": "What is Dynamic Radar Cruise Control?",
+    "a": "It maintains a set speed and distance from the vehicle ahead."
+  },
+  {
+    "q": "How does the sport-tuned suspension improve driving?",
+    "a": "It enhances handling and comfort, especially in the hybrid model."
+  },
+  {
+    "q": "What is the function of paddle shifters in the hybrid?",
+    "a": "They allow manual gear shifting for a sportier driving feel."
+  },
+  {
+    "q": "How does Hill-Start Assist Control work?",
+    "a": "It prevents rollback on inclines by holding the brake temporarily."
+  },
+  {
+    "q": "What is the benefit of the multi-link rear suspension?",
+    "a": "It improves ride quality and handling performance."
+  },
+  {
+    "q": "How do I use the driving mode select switch?",
+    "a": "Press the switch to toggle between Eco, Normal, or Sport modes."
+  },
+  {
+    "q": "What is the ground clearance of the Corolla Cross?",
+    "a": "It has an 8.1-inch ground clearance for better obstacle clearance."
+  },
+  {
+    "q": "How does Lane Tracing Assist help while driving?",
+    "a": "It keeps the vehicle centered in its lane when cruise control is active."
+  },
+  {
+    "q": "What should I do in slippery conditions?",
+    "a": "Activate traction control and drive cautiously to maintain grip."
+  },
+  {
+    "q": "How does the Corolla Cross handle city driving?",
+    "a": "Its compact size and responsive steering make it agile in urban areas."
+  },
+  {
+    "q": "What is the benefit of LED headlights while driving?",
+    "a": "They provide brighter, clearer illumination for safer night driving."
+  },
+  {
+    "q": "How do I engage the parking assist system?",
+    "a": "Activate it via the multimedia display to guide parking maneuvers."
+  },
+  {
+    "q": "What is the standard audio system in the Corolla Cross?",
+    "a": "An 8-inch touchscreen with Apple CarPlay and Android Auto compatibility."
+  },
+  {
+    "q": "What is the available JBL Premium Audio system?",
+    "a": "A 9-speaker system with an 800-watt amplifier and subwoofer."
+  },
+  {
+    "q": "How do I connect my smartphone to the audio system?",
+    "a": "Pair it via Bluetooth in the infotainment system's settings menu."
+  },
+  {
+    "q": "What is the benefit of the 10.5-inch touchscreen?",
+    "a": "It offers a larger display for easier navigation and media control."
+  },
+  {
+    "q": "Does the Corolla Cross support wireless smartphone charging?",
+    "a": "Yes, it's available on select trims."
+  },
+  {
+    "q": "How do I access SiriusXM radio?",
+    "a": "Select it on the touchscreen; a subscription may be required."
+  },
+  {
+    "q": "What are the USB ports used for in the audio system?",
+    "a": "They allow device charging and data connection for media playback."
+  },
+  {
+    "q": "How do I use voice activation for audio controls?",
+    "a": "Press the voice button on the steering wheel and follow prompts."
+  },
+  {
+    "q": "Can I stream music via Wi-Fi Connect?",
+    "a": "Yes, with an active subscription, it supports up to five devices."
+  },
+  {
+    "q": "How do I adjust audio settings?",
+    "a": "Use the touchscreen to customize bass, treble, and balance."
+  },
+  {
+    "q": "What is the cargo capacity of the 2023 Toyota Corolla Cross?",
+    "a": "It offers up to 24 cu. ft. of cargo space with rear seats up."
+  },
+  {
+    "q": "What material is used in the XLE trim interior?",
+    "a": "It features Black SofTex faux-leather upholstery."
+  },
+  {
+    "q": "Are heated front seats available?",
+    "a": "Yes, they're available on select trims for added comfort."
+  },
+  {
+    "q": "What is the purpose of the rear-seat vents?",
+    "a": "They provide climate control for rear passengers' comfort."
+  },
+  {
+    "q": "How does the power liftgate function?",
+    "a": "It opens or closes with a button press, with adjustable height."
+  },
+  {
+    "q": "What is the benefit of the roof rails?",
+    "a": "They allow for additional cargo carrying on the roof."
+  },
+  {
+    "q": "Does the Corolla Cross have a sunroof?",
+    "a": "Yes, it's available on the XSE trim for a brighter cabin."
+  },
+  {
+    "q": "What is the interior lighting feature on the XSE trim?",
+    "a": "It includes ambient interior lighting for a premium feel."
+  },
+  {
+    "q": "How do I use Remote Connect?",
+    "a": "Use the Toyota app to start the engine or lock/unlock doors remotely."
+  },
+  {
+    "q": "What is the benefit of the flip-down rear armrest?",
+    "a": "It enhances rear passenger comfort on long drives."
+  },
+  {
+    "q": "How often should I service the Corolla Cross?",
+    "a": "Every 2 years or 30,000 km for major periodic maintenance."
+  },
+  {
+    "q": "What is included in ToyotaCare?",
+    "a": "It covers 2 years or 25,000 miles of scheduled maintenance and roadside assistance."
+  },
+  {
+    "q": "How often should I change the brake fluid?",
+    "a": "Every 2 years to maintain braking performance."
+  },
+  {
+    "q": "How do I check the engine oil level?",
+    "a": "Use the dipstick under the hood to ensure it's within the marked range."
+  },
+  {
+    "q": "What type of fuel does the Corolla Cross use?",
+    "a": "It uses regular unleaded gasoline; E10 is compatible."
+  },
+  {
+    "q": "How do I clean the SofTex upholstery?",
+    "a": "Use a mild soap solution and a soft cloth to wipe down surfaces."
+  },
+  {
+    "q": "What is the recommended tire pressure?",
+    "a": "Check the driver's door placard for the recommended pressure."
+  },
+  {
+    "q": "How do I replace the windshield wiper blades?",
+    "a": "Lift the wiper arm, release the old blade, and snap in a new one."
+  },
+  {
+    "q": "What should I do for battery maintenance?",
+    "a": "Check terminals for corrosion and ensure secure connections."
+  },
+  {
+    "q": "How do I schedule maintenance with Service Connect?",
+    "a": "Enable alerts in the Toyota app to receive maintenance reminders."
+  },
+  {
+    "q": "What should I do if the hybrid system won't start?",
+    "a": "Contact a Toyota dealer for inspection and repair."
+  },
+  {
+    "q": "What if the airbag warning light stays on?",
+    "a": "Have the vehicle inspected by a Toyota dealer immediately."
+  },
+  {
+    "q": "What should I do if I smell exhaust gases inside?",
+    "a": "Open windows and have the vehicle inspected by a dealer."
+  },
+  {
+    "q": "What if the vehicle pulls to one side while driving?",
+    "a": "Check tire pressure and alignment; visit a dealer if it persists."
+  },
+  {
+    "q": "What does it mean if the check engine light is on?",
+    "a": "It indicates an engine issue; have it diagnosed by a dealer."
+  },
+  {
+    "q": "What should I do if the brakes feel unresponsive?",
+    "a": "Stop driving and contact a Toyota dealer for immediate inspection."
+  },
+  {
+    "q": "How do I use the roadside assistance service?",
+    "a": "Call the 24/7 Toyota Roadside Assistance number provided with ToyotaCare."
+  },
+  {
+    "q": "What if the vehicle overheats?",
+    "a": "Pull over, turn off the engine, and contact a dealer or roadside assistance."
+  },
+  {
+    "q": "What should I do if the tire pressure warning light is on?",
+    "a": "Check and adjust tire pressure; inspect for punctures."
+  },
+  {
+    "q": "How do I locate a stolen Corolla Cross?",
+    "a": "Use Safety Connect's stolen vehicle locator to contact authorities."
+  },
+  {
+    "q": "What is the engine size of the 2023 Corolla Cross?",
+    "a": "It has a 2.0L 4-cylinder engine with 169 horsepower."
+  },
+  {
+    "q": "What is the fuel economy of the Corolla Cross?",
+    "a": "Up to 31 city/33 highway mpg for AWD models."
+  },
+  {
+    "q": "What is the horsepower of the Corolla Cross Hybrid?",
+    "a": "It delivers 196 net combined horsepower."
+  },
+  {
+    "q": "What is the towing capacity of the Corolla Cross?",
+    "a": "It can tow up to 1,500 pounds when properly equipped."
+  },
+  {
+    "q": "What is the wheelbase of the Corolla Cross?",
+    "a": "The wheelbase is 103.9 inches."
+  },
+  {
+    "q": "What are the dimensions of the Corolla Cross?",
+    "a": "It's 175.6 inches long, 71.9 inches wide, and 64.8 inches tall."
+  },
+  {
+    "q": "What type of transmission does it have?",
+    "a": "It uses a Continuously Variable Transmission (CVT)."
+  },
+  {
+    "q": "What is the curb weight of the Corolla Cross?",
+    "a": "It ranges from 3,115 to 3,415 pounds depending on the trim."
+  },
+  {
+    "q": "What is the fuel tank capacity?",
+    "a": "It holds 12.4 gallons for FWD and 13.2 for AWD models."
+  },
+  {
+    "q": "What type of brakes does the Corolla Cross use?",
+    "a": "It has ventilated front disc brakes and solid rear disc brakes."
+  },
+  {
+    "q": "Who is the CFO of Nissan?",
+    "aliases": [
+      "Who is CFO of Nissan?",
+      "Who is Nissan CFO?",
+      "Nissan CFO"
+    ],
+    "a": "George Leondis"
+  },
+  {
+    "q": "Who is CFO of Mitsubishi?",
+    "aliases": [
+      "Who is the CFO of Mitsubishi?",
+      "Who is CFO of Mitsubishi Motors Corporation?",
+      "Mitsubishi CFO"
+    ],
+    "a": "Kentaro Matsuoka"
+  }
+]

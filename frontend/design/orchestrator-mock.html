@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Multi‑Agent Orchestrator – Mock</title>
+<style>
+  :root{
+    --text: #e6eefc;
+    --muted: #9db0cc;
+    --danger: #ff6b6b;
+    --ok: #46d19a;
+    --idle: #7a8699;
+    --chip: #1a2435;
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+    --radius: 14px;
+    --radius-sm: 10px;
+ 
+    --wire-idle: rgba(160,180,210,.35);
+    --wire-active: #4cd7ff;
+ 
+    /* Resizable sidebars */
+    --left: 300px;
+    --right: 420px;
+    --min-left: 220px;
+    --max-left: 560px;
+    --min-right: 280px;
+    --max-right: 640px;
+  }
+  *{ box-sizing: border-box; }
+  html, body{ height: 100%; background: #0b1020; }
+  body{
+    margin: 0; color: var(--text);
+    font: 14px/1.35 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  }
+ 
+  .app{
+    position: relative;
+    display: grid;
+    grid-template-columns: var(--left) 1fr var(--right);
+    grid-auto-rows: 1fr;
+    height: 100%;
+    gap: 16px;
+    padding: 16px;
+    background:
+      radial-gradient(1200px 700px at 30% -10%, #1a2244 0%, #0c1330 40%, #090d1a 100%);
+  }
+    /* Allow grid children to be clamped by the grid track size */
+    .app > .panel,
+    .app > .canvas,
+    .app > .logger {
+      min-height: 0;  /* critical for scroll inside grid children */
+    }
+    .app {
+      min-height: 0;  /* extra safety for nested grids */
+    }
+ 
+ 
+  /* ---------- Panels ---------- */
+  .panel{
+    position: relative;
+    background: linear-gradient(180deg, #0f182a 0%, #0e1424 100%);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+    overflow: hidden;
+    min-height: 0; /* allow inner scrolling in grid children */
+  }
+    /* Ensure the body becomes the scroll container */
+    .panel .panel-body {
+      flex: 1 1 auto;                /* take remaining height below header */
+      min-height: 0;                 /* allow the body to shrink below content height */
+      overflow: auto;                /* <-- scrollable area */
+    }
+ 
+  .panel-header{
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 2px;
+  }
+  .panel-title{ font-weight: 800; color: #d9e6ff; letter-spacing: .4px; flex: 1; }
+  .collapse-btn{
+    border: 1px solid rgba(255,255,255,.12);
+    background: #0e1728; color: #d9e6ff;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+  }
+  .panel[data-collapsed="true"]{ padding: 10px 8px; }
+  .panel[data-collapsed="true"] .panel-body{ display: none; }
+  .panel[data-collapsed="true"] .panel-title{
+    writing-mode: vertical-rl; text-orientation: mixed;
+    transform: rotate(180deg); letter-spacing: 1px;
+    text-align: center; padding: 6px 0;
+  }
+ 
+  .gutter{
+    position: absolute; top: 0; width: 8px; height: 100%;
+    cursor: col-resize; background: transparent;
+  }
+  .gutter:hover{ background: rgba(255,255,255,.06); }
+  .gutter.left-edge{ left: -4px; border-left: 1px solid rgba(255,255,255,.06); }
+  .gutter.right-edge{ right: -4px; border-right: 1px solid rgba(255,255,255,.06); }
+ 
+  /* Left content */
+  .field{
+    display: grid; gap: 8px;
+    background: #0c1220;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+  }
+  select{
+    width: 100%;
+    background: #0b1322;
+    border: 1px solid rgba(255,255,255,.1);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 10px; outline: none;
+  }
+  .btn{
+    border: 0; padding: 10px 12px;
+    border-radius: 10px; font-weight: 700; cursor: pointer;
+    background: linear-gradient(90deg, #1bb1ff, #6c7bff);
+    color: #08101e;
+  }
+  .muted{ color: var(--muted); }
+  .list{ display: grid; gap: 6px; overflow: auto; padding-right: 2px; }
+  .agent-item{
+    background: #0c1527; border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px; padding: 10px 12px;
+    display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+    cursor: pointer;
+  }
+  .agent-item:hover{ background: #0f1a30; }
+  .agent-item.selected{ outline: 2px solid rgba(90,227,255,.35); background:#0e1f3a; }
+  .agent-name{ display: flex; gap: 8px; align-items: center; color: #dfeaff; }
+  .pill{
+    font-size: 11px; color: #cde7ff; background: #142037;
+    border: 1px solid rgba(255,255,255,.08);
+    padding: 2px 8px; border-radius: 999px; margin-left: auto;
+  }
+  .delete{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,.08); background: #1b2237;
+    color: var(--danger); cursor: pointer;
+  }
+  .tip{
+    border-left: 3px solid #3a4a6b; padding: 8px 10px; background: #0c1426;
+    border-radius: 8px; color: #c9d8f6; font-size: 12px;
+  }
+ 
+  /* ---------- Canvas ---------- */
+  .canvas{
+    position: relative;
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    background:
+      radial-gradient(900px 700px at 55% 50%, rgba(60,110,255,.08), transparent 60%),
+      radial-gradient(700px 500px at 45% 55%, rgba(40,210,255,.05), transparent 60%),
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.07) 1px, transparent 1px) 0 0/22px 22px,
+      linear-gradient(180deg, #0e1726 0%, #0b1322 100%);
+    min-height: 0; /* allow inner overlay to size */
+    user-select: none; /* prevent accidental text selection while panning */
+  }
+  .canvas.pannable { cursor: grab; }
+  .canvas.panning  { cursor: grabbing; }
+ 
+  /* Stage: we pan+zoom this only */
+  .stage{
+    position: absolute; inset: 0;
+    transform-origin: 50% 50%;
+  }
+ 
+  /* Overlay SVG for wires (not scaled) */
+  #wiresOverlay{
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .wire{
+    stroke: var(--wire-idle); stroke-width: 2.4; fill: none;
+    filter: drop-shadow(0 0 10px rgba(90,140,255,.18));
+    stroke-linecap: round;
+  }
+  .wire.active{
+    stroke: var(--wire-active);
+    stroke-dasharray: 6 8;
+    animation: dash 1.05s linear infinite;
+    filter: drop-shadow(0 0 10px rgba(80,220,255,.55));
+  }
+  @keyframes dash{ to { stroke-dashoffset: -120; } }
+ 
+  .orchestrator{
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    width: 170px; min-height: 150px;
+    background: radial-gradient(120% 90% at 30% 20%, #1a2c4b 0%, #13223a 45%, #0f1b33 100%);
+    border: 1px solid rgba(90, 227, 255, .25);
+    border-radius: 16px; color: #e6f3ff;
+    display: grid; place-items: center; text-align: center; padding: 18px;
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.05),
+      0 15px 40px rgba(0,0,0,.4);
+  }
+  .orchestrator .sub{ margin-top: 6px; font-size: 12px; color: var(--muted); }
+ 
+  .agents{ position: absolute; inset: 0; }
+  .agent-node{
+    position: absolute;
+    background: linear-gradient(180deg, #111b30, #0d1628);
+    border: 1px solid rgba(255,255,255,.08);
+    color: #dfe6ff; padding: 12px 14px; border-radius: 12px;
+    display: inline-flex; align-items: center; gap: 8px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.25);
+    user-select: none; cursor: grab; transform: translate(-50%,-50%);
+  }
+  .agent-node:active{ cursor: grabbing; }
+  .dot{
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--idle); box-shadow: 0 0 0 rgba(0,0,0,0);
+    transition: background .15s ease, box-shadow .2s ease;
+  }
+  .dot.active{ background: var(--ok); box-shadow: 0 0 12px rgba(70, 209, 154, .7); }
+ 
+  /* ---------- Logger ---------- */
+  .logger{
+    background: linear-gradient(180deg, #0e1726 0%, #0c1424 100%);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: grid; grid-template-rows: auto 1fr auto auto; gap: 10px; padding: 14px;
+    position: relative;
+    min-height: 0;
+  }
+  .log-title{ font-weight: 800; color: #dde8ff; letter-spacing: .4px; }
+  pre{
+    margin: 0; background: #0a0f1a; border: 1px solid rgba(255,255,255,.06);
+    border-radius: 10px; padding: 12px; color: #cfe1ff; overflow: auto; max-height: 55vh;
+  }
+  .cmd{ display: grid; grid-template-columns: 1fr 96px; gap: 8px; }
+  .cmd input{
+    background: #0b1322; border: 1px solid rgba(255,255,255,.1); color: #eaf2ff;
+    border-radius: 10px; padding: 10px 12px; outline: none;
+  }
+  .chip-row{ display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip{
+    border: 1px solid rgba(255,255,255,.08); background: var(--chip); color: #d7e6ff;
+    border-radius: 999px; padding: 6px 10px; cursor: pointer;
+  }
+ 
+  /* Zoom controls */
+  .zoom-ui{
+    position: absolute; right: 12px; bottom: 12px;
+    display: inline-flex; gap: 8px; align-items: center;
+    background: rgba(10,16,30,.65);
+    border: 1px solid rgba(255,255,255,.12);
+    backdrop-filter: blur(6px);
+    padding: 6px 8px; border-radius: 10px;
+  }
+  .zoom-ui button{
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.12); background: #0e1728; color: #dfe6ff;
+  }
+  .zoom-ui .readout{ width: 58px; text-align: center; color: #cfe1ff; }
+ 
+  /* Toast */
+  .toast{
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: #0e1726; color: #dfe9ff; border: 1px solid rgba(255,255,255,.08);
+    padding: 10px 14px; border-radius: 999px; box-shadow: var(--shadow);
+    opacity: 0; pointer-events: none; transition: .25s ease;
+  }
+  .toast.show{ opacity: 1; pointer-events: auto; }
+ 
+  @media (max-width: 1100px){
+    .app{ grid-template-columns: var(--left) 1fr; grid-template-rows: 60% 40%; }
+    .logger{ grid-column: 1 / -1; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="appRoot">
+ 
+    <!-- LEFT: Agent Management -->
+<aside id="leftPanel" class="panel">
+<div class="panel-header">
+<div class="panel-title">Agent Management</div>
+<button id="leftCollapse" class="collapse-btn" title="Collapse/Expand">☰</button>
+<div id="leftGutter" class="gutter right-edge" title="Drag to resize" role="separator" aria-orientation="vertical"></div>
+</div>
+<div class="panel-body">
+<div class="field">
+<label class="muted" for="agentSelect">New Agent</label>
+<select id="agentSelect"></select>
+<button id="addBtn" class="btn">Add Agent</button>
+<div class="tip">Pick from unadded agents. You can re-add any agent you deleted.</div>
+</div>
+ 
+        <div class="panel-title" style="margin-top:10px;">Agents</div>
+<div id="agentList" class="list" role="listbox" aria-label="Agents"></div>
+<div class="tip">Click an agent to select → click <b>🗑</b> to delete.</div>
+</div>
+</aside>
+ 
+    <!-- CENTER: Canvas -->
+<main class="canvas pannable" id="canvas">
+<!-- Wires overlay (NOT scaled) -->
+<svg id="wiresOverlay"></svg>
+ 
+      <!-- Scaled+PANNED stage (nodes + orchestrator) -->
+<div id="stage" class="stage">
+<div id="orchestrator" class="orchestrator" aria-label="Orchestrator">
+<div>
+<div style="font-weight:800; font-size:16px; letter-spacing:.6px;">
+              MULTI‑AGENT ORCHESTRATOR
+</div>
+<div class="sub">(routes tasks, aggregates results)</div>
+</div>
+</div>
+<div id="agentLayer" class="agents" aria-hidden="true"></div>
+</div>
+ 
+      <!-- Zoom UI -->
+<div class="zoom-ui">
+<button id="zoomOut" title="Zoom out">−</button>
+<div id="zoomReadout" class="readout">100%</div>
+<button id="zoomIn" title="Zoom in">+</button>
+</div>
+</main>
+ 
+    <!-- RIGHT: Logger + Commands -->
+<aside id="rightPanel" class="logger panel">
+<div class="panel-header" style="margin-bottom:8px;">
+<div class="panel-title">System Communication</div>
+<div id="rightGutter" class="gutter left-edge" title="Drag to resize" role="separator" aria-orientation="vertical"></div>
+</div>
+<div class="panel-body" style="display:contents;">
+<div class="log-title">System Communication Log</div>
+<pre id="log" aria-live="polite"></pre>
+ 
+        <div class="cmd">
+<input id="cmdInput" placeholder='Type a command… e.g. "open the door and play this song"' />
+<button id="sendBtn" class="btn">Send</button>
+</div>
+<div class="chip-row" id="presets">
+<button class="chip">find route to the airport</button>
+<button class="chip">set temperature to 22</button>
+<button class="chip">play song: Never Gonna Give You Up</button>
+<button class="chip">open the door and play this song</button>
+</div>
+</div>
+</aside>
+</div>
+ 
+  <div id="toast" class="toast" role="status" aria-live="assertive"></div>
+ 
+<script>
+/** ================================
+* Catalog & App State
+* ================================ */
+const CATALOG = [
+  { id: 'car_control',  name: 'Car Control Agent',   group: 'Car',         emoji: '🛞' },
+  { id: 'navigation',   name: 'Navigation Agent',    group: 'Navigation',  emoji: '🧭' },
+  { id: 'infotainment', name: 'Infotainment Agent',  group: 'Media',       emoji: '🎵' },
+  { id: 'car-manual',   name: 'Car Manual Agent',    group: 'Docs',        emoji: '📘' },
+  { id: 'cloud-agent',  name: 'Cloud Agent',         group: 'Cloud',       emoji: '☁️' },
+];
+// Initially loaded agents (no cloud)
+let agents = CATALOG.slice(0,4).map(a => ({ ...a, x: null, y: null, pinned: false }));
+let selectedAgentId = null;
+ 
+const $ = sel => document.querySelector(sel);
+const el = (tag, cls, text) => { const e=document.createElement(tag); if(cls) e.className=cls; if(text) e.textContent=text; return e; };
+function ts(){ return new Date().toLocaleTimeString(); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+function appendLog(text){ const area=$('#log'); area.textContent+=text+"\n"; area.scrollTop=area.scrollHeight; }
+ 
+/** ================================
+* Resizable & Collapsible Panels
+* ================================ */
+const appRoot = $('#appRoot');
+const getVar = name => parseFloat(getComputedStyle(appRoot).getPropertyValue(name));
+const setVar = (name, val) => appRoot.style.setProperty(name, (typeof val==='number'? `${val}px` : val));
+ 
+let lastLeftWidth = getVar('--left') || 300;
+let lastRightWidth = getVar('--right') || 420;
+ 
+function startResize(panelSide){
+  const isLeft = panelSide === 'left';
+  const startX = event.clientX;
+  const w0 = isLeft ? getVar('--left') : getVar('--right');
+ 
+  function onMove(e){
+    const dx = e.clientX - startX;
+    if (isLeft){
+      const min = getVar('--min-left'), max = getVar('--max-left');
+      const w = Math.min(max, Math.max(min, w0 + dx));
+      setVar('--left', w); lastLeftWidth = w; requestAnimationFrame(onResized);
+    } else {
+      const min = getVar('--min-right'), max = getVar('--max-right');
+      const w = Math.min(max, Math.max(min, w0 - dx)); // drag left -> wider
+      setVar('--right', w); lastRightWidth = w; requestAnimationFrame(onResized);
+    }
+  }
+  function onUp(){
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+  }
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+$('#leftGutter').addEventListener('pointerdown', (e) => startResize('left', e));
+$('#rightGutter').addEventListener('pointerdown', (e) => startResize('right', e));
+
+function toggleCollapse(side){
+  const panel = side==='left'? $('#leftPanel') : $('#rightPanel');
+  const varName = side==='left'? '--left' : '--right';
+  const collapsed = panel.getAttribute('data-collapsed') === 'true';
+  if (collapsed){
+    setVar(varName, side==='left'? lastLeftWidth : lastRightWidth);
+    panel.setAttribute('data-collapsed','false');
+  } else {
+    if (side==='left') lastLeftWidth = getVar('--left');
+    else lastRightWidth = getVar('--right');
+    setVar(varName, '56px');
+    panel.setAttribute('data-collapsed','true');
+  }
+  requestAnimationFrame(onResized);
+}
+ 
+$('#leftGutter').addEventListener('pointerdown', () => startResize('left'));
+$('#rightGutter').addEventListener('pointerdown', () => startResize('right'));
+$('#leftCollapse').addEventListener('click', () => toggleCollapse('left'));
+ 
+/** ================================
+* Zoom + PAN (Option A: pan only the stage)
+* ================================ */
+const canvasEl = $('#canvas');
+const stage = $('#stage');
+ 
+let scale = 1;
+let panX = 0, panY = 0;
+const MIN_SCALE = 0.6, MAX_SCALE = 2.0, STEP = 0.1;
+ 
+function applyTransform() {
+  // Translate FIRST, then scale
+  stage.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+  // Redraw wires after the transform is applied
+  requestAnimationFrame(drawWires);
+}
+ 
+function setScale(next){
+  scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next));
+  $('#zoomReadout').textContent = `${Math.round(scale*100)}%`;
+  applyTransform();
+}
+$('#zoomIn').addEventListener('click', () => setScale(scale + STEP));
+$('#zoomOut').addEventListener('click', () => setScale(scale - STEP));
+// Centered zoom (simple); for zoom-to-cursor see optional snippet in previous message
+canvasEl.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = Math.sign(e.deltaY);
+  setScale(scale + (delta>0 ? -STEP : STEP));
+}, { passive:false });
+ 
+/* Panning by dragging empty canvas space */
+let isPanning = false;
+let panStartX = 0, panStartY = 0;
+let panOriginX = 0, panOriginY = 0;
+ 
+function isEmptySpace(target) {
+  return !(
+    target.closest('.agent-node') ||
+    target.closest('.orchestrator') ||
+    target.closest('.zoom-ui') ||
+    target.closest('.panel') ||
+    target.closest('.gutter')
+  );
+}
+canvasEl.addEventListener('pointerdown', (e) => {
+  if (!isEmptySpace(e.target)) return;
+  isPanning = true;
+  canvasEl.classList.add('panning');
+ 
+  panStartX = e.clientX;
+  panStartY = e.clientY;
+  panOriginX = panX;
+  panOriginY = panY;
+ 
+  canvasEl.setPointerCapture(e.pointerId);
+});
+canvasEl.addEventListener('pointermove', (e) => {
+  if (!isPanning) return;
+  const dx = e.clientX - panStartX;
+  const dy = e.clientY - panStartY;
+  panX = panOriginX + dx;
+  panY = panOriginY + dy;
+  applyTransform();
+});
+function endPan(e){
+  if (!isPanning) return;
+  isPanning = false;
+  canvasEl.classList.remove('panning');
+  if (e?.pointerId != null) canvasEl.releasePointerCapture(e.pointerId);
+}
+canvasEl.addEventListener('pointerup', endPan);
+canvasEl.addEventListener('pointercancel', endPan);
+ 
+/** ================================
+* Layout Helpers (world units for auto layout)
+* ================================ */
+function worldSize(){
+  const r = canvasEl.getBoundingClientRect();
+  // world size is canvas size / scale (pan does not affect size)
+  return { w: r.width / scale, h: r.height / scale };
+}
+function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+ 
+function autoLayout(){
+  const { w, h } = worldSize();
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w, h) * 0.36;
+ 
+  const notPinned = agents.filter(a => !a.pinned);
+  const count = notPinned.length;
+  const startDeg = -70, endDeg = 70;
+  notPinned.forEach((a, i) => {
+    const t = (count === 1) ? 0.5 : i / (count - 1);
+    const ang = (startDeg + t * (endDeg - startDeg)) * Math.PI/180;
+    a.x = cx + r * Math.cos(ang) + 140;
+    a.y = cy + r * Math.sin(ang);
+  });
+ 
+  agents.forEach(a => {
+    if (a.pinned && a.x != null && a.y != null) {
+      a.x = clamp(a.x, 60, w - 60);
+      a.y = clamp(a.y, 40, h - 40);
+    }
+  });
+}
+ 
+/** ================================
+* Rendering: select, list, nodes, wires
+* ================================ */
+function unaddedAgents(){
+  const existing = new Set(agents.map(a => a.id));
+  return CATALOG.filter(a => !existing.has(a.id));
+}
+function renderSelect(){
+  const sel = $('#agentSelect'); sel.innerHTML = '';
+  const list = unaddedAgents();
+  if (list.length === 0){
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = 'All agents added';
+    sel.append(opt);
+    sel.disabled = true;
+  } else {
+    sel.disabled = false;
+    const opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = 'Choose an agent…';
+    sel.append(opt0);
+    list.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a.id; opt.textContent = a.name;
+      sel.append(opt);
+    });
+  }
+}
+ 
+function renderList(){
+  const list = $('#agentList'); list.innerHTML = '';
+  agents.forEach(a => {
+    const item = el('div', 'agent-item'); item.dataset.id = a.id;
+    if (a.id === selectedAgentId) item.classList.add('selected');
+ 
+    const left = el('div', 'agent-name');
+    left.append(el('span','',a.emoji));
+    left.append(el('span','',a.name));
+    left.append(el('span','pill', a.group));
+ 
+    const del = el('button','delete','🗑'); del.title = 'Delete agent';
+    del.addEventListener('click', (e)=>{ e.stopPropagation(); deleteAgent(a.id); });
+    item.append(left, del);
+ 
+    item.addEventListener('click', () => {
+      selectedAgentId = a.id === selectedAgentId ? null : a.id;
+      renderList();
+    });
+    list.append(item);
+  });
+}
+ 
+function renderNodes(){
+  const layer = $('#agentLayer'); layer.innerHTML = '';
+  agents.forEach(a => {
+    const node = el('div', 'agent-node'); node.dataset.id = a.id;
+    node.style.left = (a.x ?? 0) + 'px';
+    node.style.top  = (a.y ?? 0) + 'px';
+    node.setAttribute('role', 'button'); node.setAttribute('aria-label', a.name);
+ 
+    const dot = el('span', 'dot'); dot.dataset.role = 'dot';
+    node.append(dot, el('span','',a.name));
+    layer.append(node);
+    enableDragging(node, a);
+  });
+}
+ 
+/* Wires: use DOM rects AFTER transform (pan+zoom) for perfect alignment */
+function drawWires(){
+  const svg = $('#wiresOverlay');
+  const canvasRect = canvasEl.getBoundingClientRect();
+  const orchRect = $('#orchestrator').getBoundingClientRect();
+ 
+  const w = canvasRect.width, h = canvasRect.height;
+  svg.setAttribute('width', w); svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.innerHTML = '';
+ 
+  const startX = orchRect.left + orchRect.width/2 - canvasRect.left;
+  const startY = orchRect.top  + orchRect.height/2 - canvasRect.top;
+ 
+  agents.forEach(a => {
+    const node = document.querySelector(`.agent-node[data-id="${a.id}"]`);
+    if (!node) return;
+    const r = node.getBoundingClientRect();
+    const endX = r.left + r.width/2 - canvasRect.left;
+    const endY = r.top  + r.height/2 - canvasRect.top;
+ 
+    const dx = Math.max(60, Math.abs(endX - startX) * 0.4);
+    const c1x = startX + dx, c1y = startY - 30;
+    const c2x = endX   - dx, c2y = endY + 30;
+ 
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`);
+    path.setAttribute('class','wire');
+    path.dataset.for = a.id;
+    svg.appendChild(path);
+  });
+}
+ 
+function rerender(){
+  autoLayout();
+  renderSelect();
+  renderList();
+  renderNodes();
+  requestAnimationFrame(drawWires);
+}
+ 
+/** ================================
+* Dragging nodes (zoom-aware; panning-safe)
+* ================================ */
+function enableDragging(node, agent){
+  let dragging = false, sx=0, sy=0, ax=0, ay=0;
+ 
+  function onDown(e){
+    dragging = true;
+    node.setPointerCapture(e.pointerId);
+    sx = e.clientX; sy = e.clientY;
+    ax = agent.x; ay = agent.y;
+  }
+  function onMove(e){
+    if (!dragging) return;
+    const { w, h } = worldSize();
+    const nx = clamp(ax + (e.clientX - sx)/scale, 60, w - 60);
+    const ny = clamp(ay + (e.clientY - sy)/scale, 40, h - 40);
+    agent.x = nx; agent.y = ny; agent.pinned = true;
+    node.style.left = nx + 'px'; node.style.top = ny + 'px';
+    drawWires();
+  }
+  function onUp(e){
+    dragging = false;
+    node.releasePointerCapture(e.pointerId);
+  }
+  node.addEventListener('pointerdown', onDown);
+  node.addEventListener('pointermove', onMove);
+  node.addEventListener('pointerup', onUp);
+  node.addEventListener('pointercancel', onUp);
+}
+ 
+/** ================================
+* Add / Delete agents (dropdown-based)
+* ================================ */
+function addAgentById(id){
+  if (!id){ toast('Please choose an agent.'); return; }
+  if (agents.some(a => a.id === id)){ toast('Agent already exists.'); return; }
+  const meta = CATALOG.find(a => a.id === id);
+  if (!meta) return;
+  const newA = { ...meta, x: null, y: null, pinned: false };
+  agents.push(newA);
+  selectedAgentId = newA.id;
+  rerender();
+  appendLog(`System: Added ${newA.name}.`);
+ 
+  // If Cloud Agent added, inject weather/stock prompt chips (if absent)
+  if (id === 'cloud-agent'){
+    const presets = $('#presets');
+    const ensureChip = (label) => {
+      const exists = Array.from(presets.children).some(c => c.textContent.trim() === label);
+      if (!exists){
+        const b = el('button','chip',label);
+        b.addEventListener('click', () => { $('#cmdInput').value = label; $('#sendBtn').click(); });
+        presets.append(b);
+      }
+    };
+    ensureChip('what’s the weather today?');
+    ensureChip('how are stocks today?');
+  }
+}
+ 
+function deleteAgent(id){
+  const a = agents.find(x => x.id === id);
+  if (!a) return;
+  agents = agents.filter(x => x.id !== id);
+  if (selectedAgentId === id) selectedAgentId = null;
+  rerender();
+  appendLog(`System: Deleted ${a.name}.`);
+}
+ 
+$('#addBtn').addEventListener('click', () => addAgentById($('#agentSelect').value));
+ 
+/** ================================
+* Command routing (updated rules)
+* - Music always -> Infotainment
+* - Weather/Stocks -> Cloud (if present)
+* - Navigation/Climate/Door -> respective agents
+* - Default -> Cloud if present else Infotainment
+* ================================ */
+function routeCommand(cmd){
+  const text = cmd.trim();
+  if (!text) return;
+ 
+  const lower = text.toLowerCase();
+  const targets = new Set();
+ 
+  // Navigation
+  if (/\b(route|navigate|direction|airport|find route)\b/.test(lower)) targets.add('navigation');
+ 
+  // Car control (climate/door)
+  if (/\b(temp|climate|ac|set temperature|(\b1?\d{1,2}\b)\s?°?c?)\b/.test(lower)) targets.add('car_control');
+  if (/\b(door|unlock|open the door)\b/.test(lower)) targets.add('car_control');
+ 
+  // Music -> Infotainment only
+  if (/\b(song|music|play)\b/.test(lower)) targets.add('infotainment');
+ 
+  // Cloud topics
+  const hasCloud = agents.some(a => a.id === 'cloud-agent');
+  const cloudTopics = /\b(weather|forecast|rain|wind|temperature outside|stock|stocks|market|price)\b/.test(lower);
+  if (cloudTopics && hasCloud) targets.add('cloud-agent');
+ 
+  // Default
+  if (targets.size === 0) {
+    if (hasCloud) targets.add('cloud-agent');
+    else targets.add('infotainment');
+  }
+ 
+  appendLog(`\n[${ts()}] User -> Orchestrator: "${text}"`);
+ 
+  targets.forEach(tid => {
+    const agent = agents.find(a => a.id === tid);
+    if (!agent) return;
+ 
+    activateAgent(tid);
+ 
+    const payload = makeAgentPayload(tid, lower);
+    appendLog(`Orchestrator -> ${agent.name}: ${JSON.stringify(payload, null, 2)}`);
+ 
+    setTimeout(() => {
+      const reply = makeAgentReply(tid, payload);
+      appendLog(`${agent.name} -> Orchestrator: ${JSON.stringify(reply, null, 2)}`);
+      setTimeout(() => deactivateAgent(tid), 350);
+    }, 600 + Math.random()*800);
+  });
+}
+ 
+function makeAgentPayload(agentId, text){
+  if (agentId === 'navigation') {
+    const destination = /airport/.test(text) ? 'airport' : 'destination';
+    return { task: 'find_route', destination };
+  }
+  if (agentId === 'car_control') {
+    const tempMatch = text.match(/(\d{2})\b/);
+    return tempMatch
+      ? { command: 'set_climate', temp: Number(tempMatch[1]) }
+      : { command: 'door', action: /open/.test(text) ? 'open' : 'toggle' };
+  }
+  if (agentId === 'infotainment') {
+    const song = (text.match(/play(?:\s+song)?:?\s*(.+)$/) || [,'a song'])[1];
+    return { task: 'play_song', title: song };
+  }
+  if (agentId === 'cloud-agent') {
+    if (/\b(weather|forecast|rain|wind|temperature outside)\b/.test(text)){
+      return { task: 'get_weather', location: 'local', horizon: 'today' };
+    }
+    if (/\b(stock|stocks|market|price)\b/.test(text)){
+      const symbol = (text.match(/\b[A-Z]{2,5}\b/) || [,'VNINDEX'])[1];
+      return { task: 'get_stock', symbol };
+    }
+    return { task: 'answer', query: text };
+  }
+  return { task: 'query', text };
+}
+function makeAgentReply(agentId, payload){
+  if (agentId === 'navigation')
+    return { status: 'calculating', eta: '25 min', route_quality: 'best' };
+ 
+  if (agentId === 'car_control'){
+    if (payload.command === 'set_climate') return { status: 'ok', climate: { temp: payload.temp, unit: '°C' } };
+    return { status: 'ok', door: payload.action || 'open' };
+  }
+ 
+  if (agentId === 'infotainment')
+    return { status: 'playing', track: payload.title || 'Unknown', device: 'Infotainment' };
+ 
+  if (agentId === 'cloud-agent'){
+    if (payload.task === 'get_weather')
+      return { status: 'ok', weather: { temp: 27, unit: '°C', condition: 'partly cloudy' } };
+    if (payload.task === 'get_stock')
+      return { status: 'ok', symbol: payload.symbol, price: 102.4, change: '+1.2%' };
+    return { status: 'ok', answer: 'Here is what I found.' };
+  }
+ 
+  return { status: 'received' };
+}
+ 
+/* LED + wire toggles */
+function activateAgent(id){
+  const node = document.querySelector(`.agent-node[data-id="${id}"]`);
+  const dot = node?.querySelector('.dot');
+  const wire = document.querySelector(`.wire[data-for="${id}"]`);
+  if (dot) dot.classList.add('active');
+  if (wire) wire.classList.add('active');
+}
+function deactivateAgent(id){
+  const node = document.querySelector(`.agent-node[data-id="${id}"]`);
+  const dot = node?.querySelector('.dot');
+  const wire = document.querySelector(`.wire[data-for="${id}"]`);
+  if (dot) dot.classList.remove('active');
+  if (wire) wire.classList.remove('active');
+}
+ 
+/** ================================
+* Events & Init
+* ================================ */
+function onResized(){
+  renderNodes();
+  drawWires();
+}
+window.addEventListener('resize', () => requestAnimationFrame(() => { autoLayout(); onResized(); }));
+ 
+$('#sendBtn').addEventListener('click', () => routeCommand($('#cmdInput').value));
+$('#cmdInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#sendBtn').click(); });
+document.querySelectorAll('#presets .chip').forEach(ch => {
+  ch.addEventListener('click', () => { $('#cmdInput').value = ch.textContent.trim(); $('#sendBtn').click(); });
+});
+$('#addBtn').addEventListener('click', () => addAgentById($('#agentSelect').value));
+ 
+/* Initial render + starter logs */
+(function init(){
+  setScale(1);
+  panX = 0; panY = 0;
+  applyTransform();
+ 
+  rerender();
+ 
+  appendLog(`Orchestrator -> Navigation Agent: {
+  "task": "find_route",
+  "destination": "airport"
+}
+Navigation Agent -> Orchestrator: {
+  "status": "calculating",
+  "eta": "25 min"
+}
+ 
+Orchestrator -> Car Control Agent: {
+  "command": "set_climate",
+  "temp": 22
+}
+Car Control Agent -> Orchestrator: {
+  "status": "ok",
+  "climate": { "temp": 22, "unit": "°C" }
+}`);
+})();
+</script>
+</body>
+</html>

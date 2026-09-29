@@ -1,0 +1,7 @@
+[
+  {
+    "message": "play Never Exists Song",
+    "expected_not_contains": ["[AUDIO:"],
+    "expected_contains_any": ["try", "library", "Morning", "Highway", "Sunset"]
+  }
+]

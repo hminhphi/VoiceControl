@@ -1,0 +1,16 @@
+# Build context is the repo root for car_control, car_manual,
+# voice_processing, (and infotainment). Keep it lean: only source +
+# wheels/ (needed by bind mounts) should reach the daemon.
+.venv/
+.venvs/
+.venv
+**/.venv
+.artifacts/
+.git/
+jetson-containers/
+logs/
+cache/
+output/
+**/output/
+**/__pycache__/
+**/*.pyc

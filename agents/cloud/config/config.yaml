@@ -1,0 +1,5 @@
+web_search:
+  max_result: 3
+  include_answer: False
+  include_images: True
+  search_depth: "basic"

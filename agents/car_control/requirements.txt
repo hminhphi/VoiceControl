@@ -1,0 +1,8 @@
+# car_control runtime deps — installed into system site-packages on top of
+# l4t-base (which already provides torch 2.8 + numpy 1.26 (<2), so neither
+# is listed here). Pinned for reproducible builds.
+a2a-sdk[http-server]==0.3.24
+uvicorn
+python-dotenv
+requests
+transformers==4.46.3

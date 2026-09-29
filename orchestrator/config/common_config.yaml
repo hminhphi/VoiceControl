@@ -1,0 +1,22 @@
+agent_registry:
+  agent_load_retries: 6
+  agent_load_retry_delay: 10
+  agent_card_path: "/.well-known/agent-card.json"
+  agent_list_path: "config/agent_list.json"
+
+router:
+  model_id: paraphrase-multilingual-MiniLM-L12-v2
+  threshold: 0.2
+  top_k: 3
+
+llm:
+  provider: llamacpp   # openai | llamacpp
+  model: google/gemma-4-e2b
+  temperature: 0.7
+  top_p: 0.9
+  max_tokens: 512
+  timeout: 120.0
+
+  llamacpp:
+    base_url: http://host.docker.internal:8080/v1
+    api_key: none

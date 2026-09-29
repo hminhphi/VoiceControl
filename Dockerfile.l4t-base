@@ -1,0 +1,74 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# Shared L4T base image for all GPU-enabled services
+# Built once, referenced by: voice_processing, car_control,
+#   car_manual, infotainment.
+#
+# Rebuild when: PyTorch wheel, ONNX Runtime wheel, or sherpa-onnx
+#   version changes.
+# Tag convention: orchestrator-on-edge/l4t-base:r36.4.0-torch2.8
+# ============================================================
+FROM nvcr.io/nvidia/l4t-jetpack:r36.4.0
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/nvidia:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
+ENV PIP_NO_CACHE_DIR=1
+
+# ── 1. System packages ────────────────────────────────────────
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3-pip python3-dev python3-setuptools \
+        build-essential git wget curl \
+        libopenblas0 \
+        portaudio19-dev alsa-utils libasound2-dev \
+        libasound2-plugins libpulse0 pulseaudio-utils \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── 2. pip bootstrap ─────────────────────────────────────────
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --upgrade pip setuptools "setuptools<70" wheel \
+    && python3 -m pip install \
+        numpy==1.26.4 \
+        scipy==1.15.3 \
+        psutil==7.0.0 \
+        soundfile==0.13.1 \
+        soxr>=0.3.7
+
+# ── 3. PyTorch stack (aarch64 custom wheels) ─────────────────
+# Wheels are bind-mounted at build time — NOT copied into the
+# image layer, so there is zero duplication.
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        /tmp/wheels/torch-2.8.0-cp310-cp310-linux_aarch64.whl \
+        /tmp/wheels/torchvision-0.23.0-cp310-cp310-linux_aarch64.whl \
+        /tmp/wheels/torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl
+
+# ── 4. ONNX Runtime GPU ───────────────────────────────────────
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true \
+    && python3 -m pip install \
+        /tmp/wheels/onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl
+
+RUN python3 -c "import onnxruntime as ort; \
+    providers = ort.get_available_providers(); \
+    print('[base] ONNX providers:', providers); \
+    assert 'CUDAExecutionProvider' in providers, 'CUDA EP missing'"
+
+# ── 5. sherpa-onnx (aarch64 wheel) ───────────────────────────
+# sherpa-onnx provides KeywordSpotter (wake word), SenseVoice ASR,
+# and streaming ASR — all offline, optimised for edge inference.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "sherpa-onnx>=1.12.29" \
+        "sherpa-onnx-core>=1.12.29"
+
+# ── 6. uv (fast Python package manager used by agent services) ─
+RUN pip install uv
+
+# ── Smoke test ────────────────────────────────────────────────
+RUN python3 -c "import torch; print('[base] torch', torch.__version__, 'cuda:', torch.cuda.is_available())"
+RUN python3 -c "import sherpa_onnx; print('[base] sherpa_onnx OK')"

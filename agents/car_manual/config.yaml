@@ -1,0 +1,13 @@
+# Car Manual Agent Configuration
+# Currently .env vars are used at runtime. This prepared for future migration.
+
+agent:
+  port: 8002
+  base_url: "http://localhost:8002"
+
+rag:
+  brand: "toyota"                                       # toyota | mercedes | mmc
+  search_mode: "hybrid"                                 # bm25 | embedding | hybrid
+  embedding_model: "paraphrase-multilingual-MiniLM-L12-v2"
+  top_k: 3
+  score_threshold: 0.7

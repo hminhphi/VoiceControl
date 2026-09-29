@@ -1,0 +1,11 @@
+[project]
+name = "cloud-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "a2a-sdk[http-server]==0.3.24",
+    "uvicorn",
+    "python-dotenv",
+    "tavily-python",
+    "pyyaml",
+]

@@ -1,0 +1,14 @@
+[project]
+name = "infotainment-agent"
+version = "0.1.0"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "a2a-sdk[http-server]==0.3.24",
+    "uvicorn",
+    "python-dotenv",
+    "openai",
+    "torch @ file:///app/torch-2.8.0-cp310-cp310-linux_aarch64.whl",
+    "numpy<2",
+    "beautifulsoup4",
+    "transformers",
+]
