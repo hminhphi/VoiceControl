@@ -223,6 +223,35 @@
     .trunk-open   { fill: #304060; stroke: #22c55e; stroke-width: 2; opacity: 0.5; }
     .light-off { fill: #2d3a5c; }
     .light-on  { fill: #fbbf24; filter: drop-shadow(0 0 6px #fbbf24); }
+    .light-beam { fill: #fbbf24; opacity: 0; transition: opacity 0.25s; }
+    .light-beam.on { opacity: 0.35; }
+    .win-closed { fill: #6ee7f0; opacity: 0.45; transition: opacity 0.3s, fill 0.3s; }
+    .win-open   { fill: #0f1117; opacity: 0.9; }
+    .door-anim  { transition: transform 0.35s ease; }
+
+    /* ── Telemetry cluster ── */
+    .telemetry { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .gauge {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; text-align: center;
+    }
+    .gauge .g-label { font-size: 0.66rem; letter-spacing: 0.08em; color: var(--text-dim); }
+    .gauge .g-value { font-size: 1.55rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .gauge .g-unit { font-size: 0.66rem; color: var(--text-dim); }
+    .gauge .g-bar { height: 5px; border-radius: 3px; background: var(--border); margin-top: 8px; overflow: hidden; }
+    .gauge .g-bar > span { display: block; height: 100%; width: 0;
+                           background: linear-gradient(90deg, var(--accent), var(--accent2));
+                           transition: width 0.6s, background 0.3s; }
+    .gauge.warn .g-value { color: var(--yellow); }
+    .gauge.warn .g-bar > span { background: var(--yellow); }
+
+    .alert-banner {
+      display: none; align-items: center; gap: 8px;
+      border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; font-weight: 600;
+      background: rgba(245,158,11,0.12); border: 1px solid var(--yellow); color: var(--yellow);
+    }
+    .alert-banner.show { display: flex; }
+    .alert-banner.ok { background: rgba(34,197,94,0.10); border-color: var(--green); color: var(--green); }
 
     @media (max-width: 800px) {
       .layout { grid-template-columns: 1fr; }
@@ -256,10 +285,9 @@
         <rect x="60" y="40" width="200" height="120" rx="20" class="car-body"/>
         <!-- Roof -->
         <rect x="90" y="60" width="140" height="80" rx="12" class="car-roof"/>
-        <!-- Windshield front -->
-        <rect x="100" y="65" width="55" height="30" rx="6" class="car-glass"/>
-        <!-- Windshield rear -->
-        <rect x="165" y="65" width="55" height="30" rx="6" class="car-glass"/>
+        <!-- Windows (glass) -->
+        <rect id="win-front" x="100" y="65" width="55" height="30" rx="6" class="win-closed"/>
+        <rect id="win-rear"  x="165" y="65" width="55" height="30" rx="6" class="win-closed"/>
 
         <!-- Wheels -->
         <circle cx="90"  cy="45"  r="16" class="car-wheel"/>
@@ -272,9 +300,9 @@
         <circle cx="230" cy="155" r="7"  class="car-rim"/>
 
         <!-- Left Door -->
-        <rect id="door-left" x="62" y="70" width="22" height="60" rx="4" class="door-closed"/>
+        <rect id="door-left" x="62" y="70" width="22" height="60" rx="4" class="door-closed door-anim"/>
         <!-- Right Door -->
-        <rect id="door-right" x="236" y="70" width="22" height="60" rx="4" class="door-closed"/>
+        <rect id="door-right" x="236" y="70" width="22" height="60" rx="4" class="door-closed door-anim"/>
 
         <!-- Trunk -->
         <rect id="trunk" x="85" y="148" width="150" height="14" rx="4" class="trunk-closed"/>
@@ -282,6 +310,9 @@
         <!-- Headlights -->
         <ellipse id="light-fl" cx="67" cy="52"  rx="10" ry="6" class="light-off"/>
         <ellipse id="light-fr" cx="67" cy="148" rx="10" ry="6" class="light-off"/>
+        <!-- Headlight beams -->
+        <polygon id="beam-fl" points="67,52 6,36 6,68" class="light-beam"/>
+        <polygon id="beam-fr" points="67,148 6,132 6,164" class="light-beam"/>
 
         <!-- Labels -->
         <text x="73"  y="104" text-anchor="middle" font-size="8" fill="#94a3b8">L</text>
@@ -289,6 +320,31 @@
         <text x="160" y="160" text-anchor="middle" font-size="8" fill="#94a3b8">TRUNK</text>
       </svg>
     </div>
+
+    <!-- Telemetry cluster -->
+    <div class="telemetry">
+      <div class="gauge" id="g-speed">
+        <div class="g-label">SPEED</div>
+        <div class="g-value" id="t-speed">0</div>
+        <div class="g-unit">km/h</div>
+        <div class="g-bar"><span id="t-speed-bar"></span></div>
+      </div>
+      <div class="gauge" id="g-rpm">
+        <div class="g-label">RPM</div>
+        <div class="g-value" id="t-rpm">0.0</div>
+        <div class="g-unit">x1000</div>
+        <div class="g-bar"><span id="t-rpm-bar"></span></div>
+      </div>
+      <div class="gauge" id="g-temp">
+        <div class="g-label">CABIN</div>
+        <div class="g-value" id="t-temp">28</div>
+        <div class="g-unit">°C</div>
+        <div class="g-bar"><span id="t-temp-bar"></span></div>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="alert-banner" id="alert-banner"></div>
 
     <!-- State badges -->
     <div class="state-grid" id="state-badges">
@@ -443,7 +499,9 @@ setInterval(checkStatus, 5000);
 checkStatus();
 
 // ── State rendering ────────────────────────────────────────────────────────
+let lastState = {};
 function applyState(s) {
+  lastState = s;
   // Badges
   setBadge('b-door-open',   'v-door-open',   s.door_open,    'Open',    'Closed');
   setBadge('b-door-locked', 'v-door-locked', !s.door_locked, 'Unlocked','Locked', true);
@@ -453,23 +511,31 @@ function applyState(s) {
   setBadge('b-ac',          'v-ac',          s.ac_on,        'On',      'Off');
   setBadge('b-mirror',      'v-mirror',      s.mirror_folded,'Folded',  'Unfolded', true);
 
-  // SVG
+  // SVG — doors (animated swing), trunk, lights + beams, windows
   const dl = document.getElementById('door-left');
   const dr = document.getElementById('door-right');
-  const tr = document.getElementById('trunk');
-  const lfl = document.getElementById('light-fl');
-  const lfr = document.getElementById('light-fr');
+  const dcls = s.door_open ? 'door-open door-anim' : 'door-closed door-anim';
+  dl.setAttribute('class', dcls);
+  dr.setAttribute('class', dcls);
+  dl.style.transformOrigin = 'left center';
+  dl.style.transform = s.door_open ? 'rotate(-22deg)' : 'none';
+  dr.style.transformOrigin = 'right center';
+  dr.style.transform = s.door_open ? 'rotate(22deg)' : 'none';
 
-  if (s.door_open) {
-    dl.setAttribute('class', 'door-open');
-    dr.setAttribute('class', 'door-open');
-  } else {
-    dl.setAttribute('class', 'door-closed');
-    dr.setAttribute('class', 'door-closed');
-  }
-  tr.setAttribute('class', s.trunk_open ? 'trunk-open' : 'trunk-closed');
-  lfl.setAttribute('class', s.light_on ? 'light-on' : 'light-off');
-  lfr.setAttribute('class', s.light_on ? 'light-on' : 'light-off');
+  document.getElementById('trunk').setAttribute('class', s.trunk_open ? 'trunk-open' : 'trunk-closed');
+
+  const lcls = s.light_on ? 'light-on' : 'light-off';
+  document.getElementById('light-fl').setAttribute('class', lcls);
+  document.getElementById('light-fr').setAttribute('class', lcls);
+  const bcls = s.light_on ? 'light-beam on' : 'light-beam';
+  document.getElementById('beam-fl').setAttribute('class', bcls);
+  document.getElementById('beam-fr').setAttribute('class', bcls);
+
+  const wcls = s.window_open ? 'win-open' : 'win-closed';
+  document.getElementById('win-front').setAttribute('class', wcls);
+  document.getElementById('win-rear').setAttribute('class', wcls);
+
+  updateAlerts(s);
 }
 
 function setBadge(badgeId, valId, condition, onTxt, offTxt, invert=false) {
@@ -477,6 +543,47 @@ function setBadge(badgeId, valId, condition, onTxt, offTxt, invert=false) {
   const val   = document.getElementById(valId);
   val.textContent = condition ? onTxt : offTxt;
   badge.className = 'badge' + (condition ? ' on' : '');
+}
+
+// ── Telemetry simulation (parked demo) ─────────────────────────────────────
+const sim = { speed: 0, rpm: 0.0, temp: 28 };
+function renderTelemetry() {
+  document.getElementById('t-speed').textContent = sim.speed.toFixed(0);
+  document.getElementById('t-rpm').textContent = sim.rpm.toFixed(1);
+  document.getElementById('t-temp').textContent = sim.temp.toFixed(0);
+  document.getElementById('t-speed-bar').style.width = Math.min(100, sim.speed / 1.4) + '%';
+  document.getElementById('t-rpm-bar').style.width = Math.min(100, sim.rpm * 100) + '%';
+  document.getElementById('t-temp-bar').style.width =
+    Math.min(100, Math.max(0, (sim.temp - 18) / (34 - 18) * 100)) + '%';
+  document.getElementById('g-temp').className = 'gauge' + (sim.temp >= 29 ? ' warn' : '');
+}
+function tickTelemetry() {
+  const s = lastState || {};
+  const targetRpm = (s.ac_on || s.light_on) ? 0.8 : 0.0;   // idle when an accessory is on
+  sim.rpm += (targetRpm - sim.rpm) * 0.2;
+  let target = s.ac_on ? 22 : 30;                            // cabin drifts to setpoint/ambient
+  if (s.window_open) target = s.ac_on ? 25 : 32;
+  sim.temp += (target - sim.temp) * 0.06;
+  renderTelemetry();
+}
+setInterval(tickTelemetry, 1000);
+renderTelemetry();
+
+function updateAlerts(s) {
+  const warns = [];
+  if (s.door_open) warns.push('DOOR OPEN');
+  if (s.trunk_open) warns.push('TRUNK OPEN');
+  if (s.window_open) warns.push('WINDOW OPEN');
+  if (s.mirror_folded) warns.push('MIRROR FOLDED');
+  if (s.ac_on && s.window_open) warns.push('AC ON · WINDOW OPEN');
+  const el = document.getElementById('alert-banner');
+  if (warns.length) {
+    el.className = 'alert-banner show';
+    el.textContent = '⚠ ' + warns.join('  ·  ');
+  } else {
+    el.className = 'alert-banner ok show';
+    el.textContent = '✓ All systems normal';
+  }
 }
 
 // ── SSE ────────────────────────────────────────────────────────────────────
