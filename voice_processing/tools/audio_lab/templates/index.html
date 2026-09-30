@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audio Lab — Preprocessing A/B</title>
+<style>
+  :root{
+    --bg:#0f1117; --surface:#1a1d2e; --surface2:#252840; --border:#2d3748;
+    --accent:#4f9eff; --accent2:#7c3aed; --green:#22c55e; --red:#ef4444;
+    --yellow:#f59e0b; --text:#e2e8f0; --dim:#94a3b8; --radius:12px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh}
+  header{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;gap:14px}
+  header h1{font-size:1.15rem;font-weight:700}
+  .sub{font-size:.75rem;color:var(--dim)}
+  .wrap{max-width:1280px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+  .card h2{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin-bottom:12px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  button{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:8px;
+         padding:9px 16px;font-size:.85rem;font-weight:600;cursor:pointer;transition:.15s}
+  button:hover{background:var(--accent2);border-color:var(--accent2)}
+  button.primary{background:var(--accent);border-color:var(--accent)}
+  button.primary:hover{background:#3b82f6}
+  button.rec{background:var(--red);border-color:var(--red);color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=number],input[type=file],select{background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+         color:var(--text);padding:8px 10px;font-size:.85rem;outline:none}
+  label.tog{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);
+         border-radius:8px;padding:7px 10px;font-size:.8rem;cursor:pointer;user-select:none}
+  label.tog input{accent-color:var(--accent)}
+  .slider{display:flex;flex-direction:column;gap:2px;font-size:.72rem;color:var(--dim)}
+  .slider input{width:130px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .col{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;display:flex;flex-direction:column;gap:10px}
+  .col h3{font-size:.85rem;display:flex;justify-content:space-between;align-items:center}
+  .tag{font-size:.66rem;padding:2px 8px;border-radius:99px;background:var(--surface2);border:1px solid var(--border);color:var(--dim)}
+  canvas{width:100%;background:#0a0c14;border:1px solid var(--border);border-radius:8px;display:block}
+  .lvl{margin-top:4px}
+  .lvl .bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:3px}
+  .lvl .bar>span{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--green),var(--yellow),var(--red));transition:width .4s}
+  .lvl .v{font-size:.72rem;color:var(--dim);display:flex;justify-content:space-between}
+  audio{width:100%;height:34px;margin-top:6px}
+  #status{font-size:.8rem;color:var(--dim);min-height:1.2em}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:var(--dim)}
+  .dot.ok{background:var(--green)} .dot.err{background:var(--red)}
+  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>🎧 Audio Lab — trước vs sau preprocessing</h1>
+    <div class="sub">Thu âm → AEC · NS · HPF · transient · AGC · denoise → nghe &amp; xem waveform/spectrogram</div>
+  </div>
+  <div style="margin-left:auto" class="sub">
+    denoise: <span id="nr" class="dot"></span><span id="nrtxt">…</span>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="card">
+    <h2>1 · Thu âm / tải file</h2>
+    <div class="row">
+      <label class="slider">Số giây
+        <input id="secs" type="number" value="4" min="1" max="30" step="1" style="width:80px">
+      </label>
+      <label class="slider">Thiết bị mic
+        <select id="dev"><option value="">(mặc định)</option></select>
+      </label>
+      <button id="btnRec" class="rec">● Bắt đầu thu</button>
+      <span style="color:var(--dim)">hoặc</span>
+      <input id="file" type="file" accept="audio/*">
+      <span id="status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Tuỳ chọn xử lý</h2>
+    <div class="row">
+      <label class="tog"><input type="checkbox" id="o_aec" checked> AEC (echo)</label>
+      <label class="tog"><input type="checkbox" id="o_ns" checked> Noise suppress</label>
+      <label class="slider">NS level
+        <select id="o_ns_level">
+          <option>low</option><option selected>moderate</option><option>high</option><option>very_high</option>
+        </select>
+      </label>
+      <label class="tog"><input type="checkbox" id="o_ns_linear" checked> NS linear-AEC</label>
+      <label class="tog"><input type="checkbox" id="o_hpf" checked> High-pass</label>
+      <label class="tog"><input type="checkbox" id="o_transient" checked> Transient</label>
+      <label class="tog"><input type="checkbox" id="o_agc2" checked> AGC2</label>
+      <label class="tog"><input type="checkbox" id="o_agc1"> AGC1 (target-level)</label>
+      <label class="tog"><input type="checkbox" id="o_denoise" checked> Denoise (spectral)</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="slider">AGC2 max gain (dB)
+        <input id="o_agc2_max" type="number" value="30" min="0" max="60" step="1" style="width:80px">
+      </label>
+      <label class="slider">AGC2 noise floor (dBFS)
+        <input id="o_agc2_noise" type="number" value="-18" min="-90" max="0" step="1" style="width:80px">
+      </label>
+      <label class="slider">AGC1 target (dBFS)
+        <input id="o_agc1_target" type="number" value="-3" min="-30" max="0" step="1" style="width:80px">
+      </label>
+      <label class="slider">Pre-gain (x)
+        <input id="o_pre_gain" type="number" value="1.0" min="1" max="8" step="0.5" style="width:80px">
+      </label>
+      <button id="btnRun" class="primary" disabled>▶ Chạy so sánh</button>
+    </div>
+    <div class="sub" style="margin-top:8px">
+      Lưu ý: AEC thật cần tín hiệu loa (far-end) đang phát. Ở lab offline AEC không có gì để khử;
+      NS/HPF/transient/AGC/denoise vẫn áp dụng. Muốn thử AEC: chạy khi xe đang phát TTS.
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h3>🔴 RAW <span class="tag">trước xử lý</span></h3>
+      <div class="lvl">
+        <div class="v"><span>RMS</span><span id="raw_rms">—</span></div>
+        <div class="bar"><span id="raw_rms_bar"></span></div>
+        <div class="v" style="margin-top:4px"><span>Peak</span><span id="raw_peak">—</span></div>
+        <div class="bar"><span id="raw_peak_bar"></span></div>
+      </div>
+      <canvas id="raw_wave" height="110"></canvas>
+      <canvas id="raw_spec" height="180"></canvas>
+      <audio id="raw_audio" controls loop></audio>
+    </div>
+    <div class="col">
+      <h3>🟢 PROCESSED <span class="tag">sau xử lý</span></h3>
+      <div class="lvl">
+        <div class="v"><span>RMS</span><span id="pr_rms">—</span></div>
+        <div class="bar"><span id="pr_rms_bar"></span></div>
+        <div class="v" style="margin-top:4px"><span>Peak</span><span id="pr_peak">—</span></div>
+        <div class="bar"><span id="pr_peak_bar"></span></div>
+      </div>
+      <canvas id="pr_wave" height="110"></canvas>
+      <canvas id="pr_spec" height="180"></canvas>
+      <audio id="pr_audio" controls loop></audio>
+    </div>
+  </div>
+
+  <div class="row">
+    <button id="btnAB">⏯ Phát cả hai (A/B)</button>
+    <span class="sub">Mẹo: bật loop trên player rồi bấm A/B để nghe qua lại.</span>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentFile = null;
+
+async function boot(){
+  const c = await (await fetch('/api/capabilities')).json();
+  $('nr').className = 'dot ' + (c.denoise ? 'ok' : 'err');
+  $('nrtxt').textContent = c.denoise ? 'có (noisereduce)' : 'không (pip install noisereduce)';
+  const sel = $('dev');
+  (c.input_devices||[]).forEach((n,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=n; sel.appendChild(o); });
+}
+boot();
+
+function setStatus(t){ $('status').textContent = t; }
+
+async function doRecord(){
+  const secs = parseFloat($('secs').value||'4');
+  $('btnRec').disabled = true; setStatus('đang thu '+secs+'s…');
+  try{
+    const r = await fetch('/api/record',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({seconds:secs, sr:16000, device:$('dev').value||null})});
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    currentFile = d.file; await onFile(); setStatus('đã thu '+d.file);
+  }catch(e){ setStatus('lỗi: '+e.message); }
+  finally{ $('btnRec').disabled = false; }
+}
+$('btnRec').onclick = doRecord;
+
+$('file').onchange = async (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  setStatus('đang tải lên…');
+  const fd = new FormData(); fd.append('file', f);
+  const r = await fetch('/api/upload',{method:'POST',body:fd});
+  const d = await r.json();
+  if(d.error){ setStatus('lỗi: '+d.error); return; }
+  currentFile = d.file; await onFile(); setStatus('đã tải '+d.file);
+};
+
+async function onFile(){
+  $('btnRun').disabled = false;
+  const a = await (await fetch('/api/analyze?file='+encodeURIComponent(currentFile))).json();
+  render('raw', a);
+  $('raw_audio').src = '/media/'+currentFile;
+  // reset processed
+  $('pr_audio').src = '';
+  render('pr', null);
+}
+
+function opts(){
+  return {
+    aec: $('o_aec').checked, ns: $('o_ns').checked, ns_level: $('o_ns_level').value,
+    ns_linear: $('o_ns_linear').checked, hpf: $('o_hpf').checked, transient: $('o_transient').checked,
+    agc2: $('o_agc2').checked, agc2_max_gain: parseFloat($('o_agc2_max').value||'30'),
+    agc2_max_noise: parseFloat($('o_agc2_noise').value||'-50'),
+    agc1: $('o_agc1').checked, agc1_target: parseFloat($('o_agc1_target').value||'-3'),
+    pre_gain: parseFloat($('o_pre_gain').value||'1.0'),
+    denoise: $('o_denoise').checked, mono16:true
+  };
+}
+
+$('btnRun').onclick = async ()=>{
+  if(!currentFile) return;
+  $('btnRun').disabled = true; setStatus('đang xử lý…');
+  try{
+    const r = await fetch('/api/process',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file:currentFile, sr:16000, opts:opts()})});
+    const d = await r.json();
+    if(d.error) throw new Error(d.error);
+    const a = await (await fetch('/api/analyze?file='+encodeURIComponent(d.processed_file))).json();
+    render('pr', a);
+    $('pr_audio').src = '/media/'+d.processed_file;
+    setStatus('xong: '+d.processed_file);
+  }catch(e){ setStatus('lỗi: '+e.message); }
+  finally{ $('btnRun').disabled = false; }
+};
+
+$('btnAB').onclick = ()=>{
+  const a=$('raw_audio'), b=$('pr_audio');
+  a.currentTime=0; b.currentTime=0;
+  a.play(); b.play();
+};
+
+// ── rendering ───────────────────────────────────────────────────────────────
+function dbfsToPct(db){ return Math.max(0, Math.min(100, (db + 60) / 60 * 100)); }
+
+function render(side, a){
+  const wave = $(side+'_wave'), spec = $(side+'_spec');
+  if(!a){ clearCanvas(wave); clearCanvas(spec);
+    $(side+'_rms').textContent='—'; $(side+'_peak').textContent='—';
+    $(side+'_rms_bar').style.width='0%'; $(side+'_peak_bar').style.width='0%'; return; }
+  drawWave(wave, a.wave_min, a.wave_max, a.wave_rms, side==='raw' ? '#ef4444' : '#22c55e');
+  drawSpec(spec, a.spec);
+  $(side+'_rms').textContent = a.rms_dbfs+' dBFS';
+  $(side+'_peak').textContent = a.peak_dbfs+' dBFS';
+  $(side+'_rms_bar').style.width = dbfsToPct(a.rms_dbfs)+'%';
+  $(side+'_peak_bar').style.width = dbfsToPct(a.peak_dbfs)+'%';
+}
+
+function clearCanvas(c){ const x=c.getContext('2d'); x.clearRect(0,0,c.width,c.height); }
+
+function fit(canvas){
+  const dpr = window.devicePixelRatio||1;
+  const w = canvas.clientWidth||600, h = canvas.height;
+  if(canvas.width !== w*dpr){ canvas.width = w*dpr; canvas.height = h*dpr; }
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx, w, h};
+}
+
+function drawWave(canvas, mins, maxs, rms, color){
+  const {ctx,w,h} = fit(canvas);
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle='#0a0c14'; ctx.fillRect(0,0,w,h);
+  ctx.strokeStyle='#1f2a3a'; ctx.beginPath(); ctx.moveTo(0,h/2); ctx.lineTo(w,h/2); ctx.stroke();
+  const n = mins.length; if(!n) return;
+  ctx.fillStyle = color;
+  for(let i=0;i<n;i++){
+    const x = i/n*w;
+    const y1 = h/2 - maxs[i]*(h/2-4);
+    const y2 = h/2 - mins[i]*(h/2-4);
+    ctx.fillRect(x, y1, Math.max(1,w/n), Math.max(1,y2-y1));
+  }
+  ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.beginPath();
+  for(let i=0;i<n;i++){ const x=i/n*w, y=h/2 - rms[i]*(h/2-4); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }
+  ctx.stroke();
+}
+
+// simple magma-ish colormap
+function heat(t){
+  t = Math.max(0,Math.min(1,t));
+  const stops=[[0,0,4],[40,11,84],[101,21,110],[159,42,99],[212,72,66],[245,125,21],[252,193,59],[252,253,191]];
+  const x = t*(stops.length-1), i = Math.floor(x), f = x-i;
+  const c0 = stops[i], c1 = stops[Math.min(i+1,stops.length-1)];
+  return [c0[0]+(c1[0]-c0[0])*f, c0[1]+(c1[1]-c0[1])*f, c0[2]+(c1[2]-c0[2])*f];
+}
+
+function drawSpec(canvas, s){
+  const {ctx,w,h} = fit(canvas);
+  ctx.clearRect(0,0,w,h);
+  if(!s || !s.ntime){ ctx.fillStyle='#0a0c14'; ctx.fillRect(0,0,w,h); return; }
+  const img = ctx.createImageData(w,h);
+  for(let y=0;y<h;y++){
+    // canvas top = high freq
+    const fb = Math.floor((1 - y/h) * (s.nbins-1));
+    for(let x=0;x<w;x++){
+      const tb = Math.floor(x/w * (s.ntime-1));
+      const v = s.data[fb*s.ntime + tb];
+      const [r,g,b] = heat(v);
+      const o = (y*w + x)*4;
+      img.data[o]=r; img.data[o+1]=g; img.data[o+2]=b; img.data[o+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+  ctx.fillStyle='rgba(255,255,255,.55)'; ctx.font='10px Consolas';
+  ctx.fillText((s.max_freq/1000).toFixed(1)+' kHz', 4, 12);
+  ctx.fillText('0', 4, h-3);
+  ctx.fillText(s.lo_db+'…'+s.hi_db+' dB', w-110, 12);
+}
+
+window.addEventListener('resize', ()=>{ if(currentFile) onFile(); });
+</script>
+</body>
+</html>

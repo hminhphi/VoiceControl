@@ -47,6 +47,7 @@ voice_processing/agent_assets/models/asr_whisper/
 voice_processing/agent_assets/models/faster_whisper/
 voice_processing/agent_assets/models/tts/
 voice_processing/agent_assets/models/kws/*.onnx
+voice_processing/tools/audio_lab/recordings/
 
 # ── Build / distribution outputs ────────────────────────────
 build/
