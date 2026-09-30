@@ -46,6 +46,8 @@ class VADProcessor:
         # Threshold from env or defaults
         self._threshold_high = float(os.environ.get("VAD_THRESHOLD_HIGH", "0.55"))
         self._threshold_low = float(os.environ.get("VAD_THRESHOLD_LOW", "0.20"))
+        # Consecutive speech frames required to trigger (higher = less noise).
+        self._window_size = max(1, int(os.environ.get("VAD_WINDOW_SIZE", str(_WINDOW_SIZE))))
 
         # Provider configurable via VAD_PROVIDER / ONNX_PROVIDER (default cpu).
         # CPU is the sane default for this tiny model: GPU adds per-chunk overhead.
@@ -152,7 +154,7 @@ class VADProcessor:
 
         # Sliding window
         self._window.append(is_voice)
-        if len(self._window) > _WINDOW_SIZE:
+        if len(self._window) > self._window_size:
             self._window.pop(0)
 
         self._latest_prob = speech_prob
@@ -160,7 +162,7 @@ class VADProcessor:
 
     def is_speech(self) -> bool:
         """Return True if sliding window majority is voice."""
-        return self._window.count(True) >= _WINDOW_SIZE
+        return self._window.count(True) >= self._window_size
 
     def empty_buffer(self) -> None:
         """Reset buffer and internal state (after wake word detection)."""

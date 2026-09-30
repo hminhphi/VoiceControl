@@ -22,6 +22,14 @@ Environment variables:
     AEC_AGC_ENABLED=1      enable AGC2 adaptive digital leveling (default: 1)
     AEC_NS_LEVEL=high      NS strength: low|moderate|high|very_high (default: high)
     AEC_TRANSIENT_SUPPRESS=1 transient click suppression (default: 1)
+    AEC_NS_LINEAR=0        NS analyses linear AEC output (stronger; default: 0)
+    AEC_HPF_FULL_BAND=1    high-pass applies in full band (default: 1)
+    AEC_MOBILE_MODE=0      echo canceller mobile mode (default: 0)
+    AEC_EXPORT_LINEAR=0    export linear AEC output (default: 0)
+    AEC_AGC1_ENABLED=0     optional AGC1 target-level loudness + limiter (default: 0)
+    AEC_AGC1_TARGET_DBFS=-3  AGC1 target level (default: -3)
+    AEC_AGC1_COMPRESSION_DB=9 AGC1 compression gain (default: 9)
+    AEC_AGC1_LIMITER=1     AGC1 limiter (default: 1)
     AEC_AGC_HEADROOM_DB=5  target headroom below clipping (default: 5.0)
     AEC_AGC_MAX_GAIN_DB=30 max adaptive boost for weak mics (default: 30.0)
     AEC_AGC_INITIAL_GAIN_DB=15 starting gain, converges down/up (default: 15.0)
@@ -120,7 +128,9 @@ class AecEngine:
                 f"apm={self._apm_rate}Hz delay={self._delay_ms}ms "
                 f"preprocess={enable_preprocess} "
                 f"agc={getattr(self, '_agc_enabled', False)} "
+                f"agc1={getattr(self, '_agc1_enabled', False)} "
                 f"ns={getattr(self, '_ns_level', 'n/a')} "
+                f"ns_linear={getattr(self, '_ns_linear', False)} "
                 f"pre_gain={getattr(self, '_pre_gain', 1.0)}",
                 flush=True,
             )
@@ -142,10 +152,16 @@ class AecEngine:
         self._apm = apm_mod.WebRTCAudioProcessing()
         config = apm_mod.create_default_config()
         config.echo.enabled = True
-        config.echo.mobile_mode = False
+        config.echo.mobile_mode = _env_bool("AEC_MOBILE_MODE", False)
+        config.echo.export_linear_aec_output = _env_bool("AEC_EXPORT_LINEAR", False)
         if enable_preprocess:
             config.high_pass.enabled = True
+            config.high_pass.apply_in_full_band = _env_bool("AEC_HPF_FULL_BAND", True)
             config.noise_suppress.enabled = True
+            # NS can analyse the linear AEC output for stronger suppression.
+            config.noise_suppress.analyze_linear_aec_output_when_available = _env_bool(
+                "AEC_NS_LINEAR", False
+            )
             # Env: AEC_NS_LEVEL=low|moderate|high|very_high (default: high,
             # xiaozhi-style stronger suppression for noisy rooms).
             ns_level = os.environ.get("AEC_NS_LEVEL", "high").strip().lower()
@@ -185,6 +201,21 @@ class AecEngine:
             gc2.adaptive_controller.max_output_noise_level_dbfs = _env_float(
                 "AEC_AGC_MAX_NOISE_DBFS", -50.0
             )
+
+        # ── Optional AGC1 (target-level loudness + limiter) ──────────
+        # Complements AGC2: drives the level toward a fixed target and limits
+        # peaks. Useful to make a weak mic loud enough for the ASR model.
+        # Env: AEC_AGC1_ENABLED=1, AEC_AGC1_TARGET_DBFS=-3,
+        #      AEC_AGC1_COMPRESSION_DB=9, AEC_AGC1_LIMITER=1
+        self._agc1_enabled = _env_bool("AEC_AGC1_ENABLED", False)
+        self._ns_linear = _env_bool("AEC_NS_LINEAR", False)
+        if self._agc1_enabled:
+            gc1 = config.gain_control1
+            gc1.enabled = True
+            gc1.controller_mode = apm_mod.GainController1Mode.ADAPTIVE_DIGITAL
+            gc1.target_level_dbfs = int(_env_float("AEC_AGC1_TARGET_DBFS", -3.0))
+            gc1.compression_gain_db = int(_env_float("AEC_AGC1_COMPRESSION_DB", 9.0))
+            gc1.enable_limiter = _env_bool("AEC_AGC1_LIMITER", True)
 
         # ── Optional fixed pre-amp (manual override, default off) ───
         # Env: AEC_PRE_GAIN=2.0  (linear factor; 1.0 = disabled)

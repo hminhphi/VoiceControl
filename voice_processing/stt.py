@@ -115,6 +115,45 @@ def _build_recognizer(factory, **kwargs):
         raise
 
 
+# ── Whisper hallucination filtering ─────────────────────────────────────────
+# Whisper invents short filler phrases ("Yeah.", "Thank you.") on noise/silence.
+# These are dropped by default; disable with STT_DROP_SHORT_HALLUCINATIONS=0 and
+# extend/override the list with STT_HALLUCINATION_BLOCKLIST="a,b,c".
+_HALLUCINATION_TEXTS = {
+    "yeah", "yeah yeah", "yep", "yup",
+    "hmm", "mm", "mmm", "uh", "uhh", "um", "umm", "ah", "eh", "oh",
+    "thank you", "thanks", "thank you very much",
+    "thanks for watching", "thank you for watching",
+    "please subscribe", "subscribe", "like and subscribe",
+    "you", "bye", "bye bye", "goodbye", "hello", "hi", "ha", "haha", "wow", "huh",
+    "phone beeps", "beep", "beeps", "applause", "music", "silence",
+    "subtitle", "subtitles", "subs",
+}
+_DROP_SHORT_HALLUCINATIONS = _env_bool("STT_DROP_SHORT_HALLUCINATIONS", True)
+
+
+def _strip_hallucination(text: str) -> str:
+    """Return "" when the transcript looks like Whisper noise/hallucination."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    core = t.strip(" \t\r\n.!?,…。！？\"'").lower()
+    if not core:
+        return ""
+    if core[0] in "([{" and core[-1] in ")]}":  # bracketed-only, e.g. "(phone beeps)"
+        return ""
+    if _DROP_SHORT_HALLUCINATIONS:
+        extra = {
+            w.strip().lower()
+            for w in os.environ.get("STT_HALLUCINATION_BLOCKLIST", "").split(",")
+            if w.strip()
+        }
+        if core in _HALLUCINATION_TEXTS or core in extra:
+            return ""
+    return t
+
+
+
 
 def _normalize_optional_language(language):
     lang = (language or "").strip().lower()
@@ -670,7 +709,7 @@ class SherpaWhisperBackend:
         s.accept_waveform(STT_SAMPLE_RATE, samples)
         self._model.decode_stream(s)
         res = s.result
-        text = (getattr(res, "text", "") or "").strip()
+        text = _strip_hallucination(getattr(res, "text", "") or "")
         lang = getattr(res, "lang", None) or None
 
         print(
@@ -742,22 +781,38 @@ class FasterWhisperBackend:
         samples = resample_audio(audio_int16, self.device_sample_rate, STT_SAMPLE_RATE)
         rms, peak = _audio_metrics(samples)
 
+        no_speech_threshold = float(os.environ.get("FW_NO_SPEECH_THRESHOLD", "0.6"))
+        log_prob_threshold = float(os.environ.get("FW_LOG_PROB_THRESHOLD", "-1.0"))
+        min_avg_logprob = float(os.environ.get("FW_MIN_AVG_LOGPROB", "-1.0"))
+
         segments, info = self.model.transcribe(
             samples,
             language=self.language or None,
             beam_size=self.beam_size,
             vad_filter=True,
             condition_on_previous_text=False,
-            no_speech_threshold=0.6,
+            no_speech_threshold=no_speech_threshold,
+            log_prob_threshold=log_prob_threshold,
+            compression_ratio_threshold=2.4,
             temperature=0.0,
         )
-        text = "".join(seg.text for seg in segments).strip()
+        texts = []
+        for seg in segments:
+            if getattr(seg, "no_speech_prob", 0.0) > no_speech_threshold:
+                continue
+            if getattr(seg, "avg_logprob", 0.0) < min_avg_logprob:
+                continue
+            part = _strip_hallucination(seg.text)
+            if part:
+                texts.append(part)
+        text = " ".join(texts).strip()
         lang = getattr(info, "language", None)
         prob = getattr(info, "language_probability", None)
 
         print(
             f"[STT][debug] backend=faster_whisper samples={len(samples)} "
-            f"rms={rms:.5f} peak={peak:.5f} lang={lang} prob={prob}"
+            f"rms={rms:.5f} peak={peak:.5f} lang={lang} prob={prob} "
+            f"kept={len(texts)}"
         )
         try:
             print(f"[STT][debug] text={text!r}")

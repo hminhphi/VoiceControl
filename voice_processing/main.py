@@ -113,6 +113,11 @@ WAKE_WORD_DEBOUNCE = 0.8
 BUFFER_MAX = 300 * CHUNK
 TTS_CHUNK_COUNT = int(os.environ.get("TTS_CHUNK_COUNT", "5"))
 VAD_DETECT_THRESHOLD = _env_float("VAD_DETECT_THRESHOLD", 0.550)
+# Drop near-silence / noise-only segments before they reach STT (0 = disabled).
+try:
+    STT_MIN_RMS = float(os.environ.get("STT_MIN_RMS", "0.0") or "0.0")
+except ValueError:
+    STT_MIN_RMS = 0.0
 FOLLOWUP_LISTEN_SEC = _env_float("FOLLOWUP_LISTEN_SEC", 12.0)
 # Barge-in (xiaozhi-style interruption): keep VAD listening during TTS
 # replies; sustained speech aborts playback and starts a new turn.
@@ -475,16 +480,23 @@ def run():
                     elif now >= segment_at and len(collected_speech) > 0:
                         dur = len(collected_speech) / DEVICE_SAMPLE_RATE
                         if dur >= MIN_SEGMENT_SEC:
-                            try:
-                                audio_segment = collected_speech.copy()
-                                rms, peak = _audio_stats(audio_segment)
-                                stt_queue.put(audio_segment, block=False)
+                            audio_segment = collected_speech.copy()
+                            rms, peak = _audio_stats(audio_segment)
+                            if STT_MIN_RMS > 0 and rms < STT_MIN_RMS:
                                 print(
-                                    f"[STT] Queued audio segment dur={dur:.2f}s "
-                                    f"rms={rms:.5f} peak={peak:.5f}"
+                                    f"[STT] Skip low-energy segment "
+                                    f"rms={rms:.5f} < STT_MIN_RMS={STT_MIN_RMS:.5f} "
+                                    f"dur={dur:.2f}s"
                                 )
-                            except queue.Full:
-                                print("[STT] Queue full; dropped audio segment")
+                            else:
+                                try:
+                                    stt_queue.put(audio_segment, block=False)
+                                    print(
+                                        f"[STT] Queued audio segment dur={dur:.2f}s "
+                                        f"rms={rms:.5f} peak={peak:.5f}"
+                                    )
+                                except queue.Full:
+                                    print("[STT] Queue full; dropped audio segment")
                             pending_turn = True
                         collected_speech = np.array([], dtype=np.int16)
                     elif now >= turn_end_at and not pending_turn:
