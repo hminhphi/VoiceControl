@@ -85,8 +85,12 @@ class TargetSpeakerExtractor:
                 score = analyzer.similarity(ref_emb, emb)
                 label = f"sim={score:.3f}"
             else:
-                score = _rms(s)          # fallback: loudest stream
-                label = f"rms={score:.4f}"
+                # Fallback: similarity to the turn onset (first ref_sec = target
+                # speaking right after the wake word) — better than loudness.
+                a = s[:len(ref)]
+                denom = (float(np.linalg.norm(a)) * float(np.linalg.norm(ref))) or 1.0
+                score = float(np.dot(a, ref) / denom)
+                label = f"corr={score:.3f}"
             print(f"[TSE] stream len={len(s)/16000:.2f}s {label}", flush=True)
             if score > best_score:
                 best, best_score = s, score

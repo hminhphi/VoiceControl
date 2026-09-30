@@ -62,3 +62,14 @@ public defaults need it).
 - `voice_processing/kokoro_tts/.env` holds a personal OpenAI key for the
   standalone client — it is gitignored and never shipped. A `.env.example`
   template is provided.
+
+## Benchmark datasets (auto-downloaded, no fetch needed)
+
+Used by `scripts/asr_benchmark.py` (see [`BENCHMARK.md`](BENCHMARK.md)):
+
+| Dataset | Source | Purpose |
+|---------|--------|---------|
+| `google/fleurs` (vi_vn, ja_jp, en_us, `test`) | HF | clean multilingual WER/CER + language detection |
+| `corypaik/musan` (`noise`) | HF (mirror of OpenSLR MUSAN, CC BY 4.0) | additive noise at SNR levels |
+
+They download to the HuggingFace cache on first run (`~/.cache/huggingface`).
