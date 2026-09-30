@@ -225,6 +225,14 @@ services:
       - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}
       - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
+      # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
+      - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
+      - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}
+      - SPEAKER_PIPELINE=${SPEAKER_PIPELINE:-pyannote/speaker-diarization-community-1}
+      - SPEAKER_EMBEDDING=${SPEAKER_EMBEDDING:-pyannote/embedding}
+      - SPEAKER_HF_TOKEN=${SPEAKER_HF_TOKEN:-}
+      - SPEAKER_GATE_OVERLAP=${SPEAKER_GATE_OVERLAP:-0}
+      - SPEAKER_OVERLAP_MIN=${SPEAKER_OVERLAP_MIN:-0.15}
       # STT backend selection
       - STT_BACKEND=${STT_BACKEND:-whisper_trt}
       - STT_MODEL=${STT_MODEL:-small.en}

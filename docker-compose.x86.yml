@@ -182,6 +182,14 @@ services:
       - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}       # Kokoro TTS / VAD
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word
       - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
+      # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
+      - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
+      - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}
+      - SPEAKER_PIPELINE=${SPEAKER_PIPELINE:-pyannote/speaker-diarization-community-1}
+      - SPEAKER_EMBEDDING=${SPEAKER_EMBEDDING:-pyannote/embedding}
+      - SPEAKER_HF_TOKEN=${SPEAKER_HF_TOKEN:-}
+      - SPEAKER_GATE_OVERLAP=${SPEAKER_GATE_OVERLAP:-0}
+      - SPEAKER_OVERLAP_MIN=${SPEAKER_OVERLAP_MIN:-0.15}
       # STT — sherpa_onnx là default tốt nhất cho x86 offline
       # auto = detect the language per utterance (faster-whisper: vi/en/ja)
       - STT_BACKEND=${STT_BACKEND:-faster_whisper}

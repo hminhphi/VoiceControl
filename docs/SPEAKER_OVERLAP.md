@@ -113,3 +113,32 @@ giọng target khi cần.
 2. Thêm stage `SPEAKER_OSD`/`SPEAKER_TSE` trong `voice_processing` (opt-in).
 3. Đo trên audio thật (2 người nói chồng) bằng PoC → tinh chỉnh ngưỡng.
 4. (Tùy chọn) benchmark đối chiếu với pyannote.
+
+## 9. Đã triển khai (opt-in, GPU)
+
+- **`voice_processing/speaker.py`** — `SpeakerAnalyzer` (pyannote.audio **trên torch CUDA**,
+  chạy GPU cả x86 `cu128` lẫn Jetson `torch-2.8 aarch64`): diarization →
+  **overlap intervals** → dominant speaker; kèm embedding để **chọn người nói mục tiêu**.
+  Tự tắt an toàn nếu thiếu pyannote/token.
+- **`voice_processing/main.py`** — `process_stt` gom audio từng turn, chạy analyzer,
+  log `[SPEAKER] overlap=...`; nếu `SPEAKER_GATE_OVERLAP=1` và overlap ≥ ngưỡng →
+  phát câu "nhiều người nói, nhắc lại" (theo ngôn ngữ) thay vì đẩy audio lẫn vào LLM.
+- **Docker**: `voice_processing/Dockerfile` (arm64) + `Dockerfile.x86` cài
+  `pyannote.audio` (dùng torch CUDA sẵn có). `ffmpeg` đã có trong base.
+- **PoC**: `tools/speaker_overlap.py` (pyannote/3D-Speaker + fallback VAD, xuất RTTM).
+
+**Bật (mặc định tắt):**
+
+```dotenv
+SPEAKER_ENABLED=1
+SPEAKER_DEVICE=cuda
+SPEAKER_PIPELINE=pyannote/speaker-diarization-community-1
+SPEAKER_EMBEDDING=pyannote/embedding
+SPEAKER_HF_TOKEN=hf_xxx           # model pyannote là gated: accept điều khoản + token
+SPEAKER_GATE_OVERLAP=1            # overlap >= ngưỡng -> xin nhắc lại
+SPEAKER_OVERLAP_MIN=0.15
+```
+
+**TSE thật (tách giọng target khỏi hỗn hợp)** vẫn là bước mở rộng — dùng
+`ClearerVoice-Studio` (Apache-2.0, torch CUDA) với reference = mẫu giọng wake-word;
+chưa tích hợp (cần thêm model + đo trên thiết bị).

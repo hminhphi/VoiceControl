@@ -45,6 +45,7 @@ from vad import VADProcessor
 from stt import STTProcessor
 from tts import TTSProcessor
 from lang import detect_lang
+from speaker import get_analyzer, clarify_message
 from orchestrator_client import send_and_stream
 from aec import AecEngine
 
@@ -118,6 +119,12 @@ try:
     STT_MIN_RMS = float(os.environ.get("STT_MIN_RMS", "0.0") or "0.0")
 except ValueError:
     STT_MIN_RMS = 0.0
+
+# Speaker overlap stage (opt-in, GPU): diarize each turn, detect overlapped
+# speech, and optionally ask to repeat instead of feeding mixed audio to the LLM.
+SPEAKER_ENABLED = os.environ.get("SPEAKER_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
+SPEAKER_GATE_OVERLAP = os.environ.get("SPEAKER_GATE_OVERLAP", "0").strip().lower() in ("1", "true", "yes", "on")
+SPEAKER_OVERLAP_MIN = float(os.environ.get("SPEAKER_OVERLAP_MIN", "0.15") or "0.15")
 FOLLOWUP_LISTEN_SEC = _env_float("FOLLOWUP_LISTEN_SEC", 12.0)
 # Barge-in (xiaozhi-style interruption): keep VAD listening during TTS
 # replies; sustained speech aborts playback and starts a new turn.
@@ -140,6 +147,25 @@ def _audio_stats(audio_int16):
     rms = float(np.sqrt(np.mean(samples * samples)))
     peak = float(np.max(np.abs(samples)))
     return rms, peak
+
+
+def _concat_int16(parts):
+    parts = [p for p in parts if p is not None and len(p)]
+    if not parts:
+        return np.array([], dtype=np.int16)
+    return np.concatenate(parts)
+
+
+def _to_f32_16k(audio_int16, src_sr):
+    f = audio_int16.astype(np.float32) / 32768.0
+    if src_sr == 16000:
+        return f
+    try:
+        from resampler import Resampler
+        return Resampler(src_sr, 16000).resample(f)
+    except Exception:
+        n = int(len(f) * 16000 / src_sr)
+        return np.interp(np.linspace(0, len(f) - 1, n), np.arange(len(f)), f).astype(np.float32)
 
 
 def _dbfs(value):
@@ -541,6 +567,7 @@ def run():
         print(f"[audio][thread] process_stt_tid={get_native_id()}", flush=True)
         turn_texts = []
         turn_lang = None
+        turn_audio_parts = []
         while not stop.is_set():
             try:
                 item = stt_queue.get(timeout=1.0)
@@ -553,8 +580,39 @@ def run():
                         continue
                     lang = turn_lang
                     print(f"[TURN] Transcript ready: {text!r} lang={lang}")
+                    # ── Speaker overlap / target gate (opt-in, GPU) ──
+                    if SPEAKER_ENABLED and turn_audio_parts:
+                        try:
+                            analyzer = get_analyzer()
+                            if analyzer is not None:
+                                wav16 = _to_f32_16k(_concat_int16(turn_audio_parts), DEVICE_SAMPLE_RATE)
+                                res = analyzer.analyze(wav16, 16000)
+                                print(
+                                    f"[SPEAKER] turns={len(res['turns'])} "
+                                    f"overlap={res['overlap_ratio']:.2f} "
+                                    f"dominant={res['dominant']}"
+                                )
+                                if SPEAKER_GATE_OVERLAP and res["overlap_ratio"] >= SPEAKER_OVERLAP_MIN:
+                                    msg = clarify_message(lang or "en")
+                                    print(f"[SPEAKER] Overlap gate -> {msg}")
+                                    tts.speech(
+                                        msg,
+                                        language=lang,
+                                        output_queue=output_queue,
+                                        chunk_size=CHUNK,
+                                        device_sample_rate=DEVICE_SAMPLE_RATE,
+                                    )
+                                    ignore_audio_until = time.time() + LISTENING_GRACE_SEC
+                                    followup_until = time.time() + FOLLOWUP_LISTEN_SEC
+                                    turn_audio_parts = []
+                                    turn_lang = None
+                                    continue
+                        except Exception as e:
+                            print(f"[SPEAKER][error] {type(e).__name__}: {e}", flush=True)
+                    turn_audio_parts = []
                 else:
                     audio = item
+                    turn_audio_parts.append(audio)
                     dur = len(audio) / DEVICE_SAMPLE_RATE
                     t0 = time.time()
                     out = stt.transcribe(audio)

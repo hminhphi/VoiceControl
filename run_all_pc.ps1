@@ -144,6 +144,8 @@ function Start-VoiceHost {
         $lines += "`$env:STT_WHISPER_DIR = '$VOICE_DIR\agent_assets\models\asr_whisper'"
         $lines += "`$env:STT_WHISPER_MODEL = 'small'"
         $lines += "`$env:PIPER_VI_DIR = '$VOICE_DIR\agent_assets\models\tts\vits-piper-vi_VN-vais1000-medium'"
+        $lines += "`$env:SPEAKER_ENABLED = '0'"
+        $lines += "`$env:SPEAKER_DEVICE = 'cuda'"
         $lines += "`$env:WAKE_WORD_BACKEND = 'openwakeword'"
         $lines += "`$env:WAKE_WORD_MODEL_DIR = '$VOICE_DIR\agent_assets\models\kws'"
         $lines += "`$env:AUDIO_SAMPLE_RATE = '16000'"

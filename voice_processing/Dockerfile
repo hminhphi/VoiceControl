@@ -63,7 +63,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         "espeakng-loader>=0.2.4" \
         "phonemizer-fork>=3.3.2"
 
-# ── 7. torch2trt + whisper_trt ─────────────────────────────────
+# ── 7. Speaker overlap / diarization (opt-in, GPU via torch CUDA) ─────
+# pyannote.audio runs on the torch CUDA already present in l4t-base.
+# Models are gated on HuggingFace: accept the model conditions and set
+# SPEAKER_HF_TOKEN (or HF_TOKEN) at runtime.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install "pyannote.audio>=3.1.0"
+
+# ── 8. torch2trt + whisper_trt ─────────────────────────────────
 # REMOVED 2026-09: only needed to build whisper_trt engines (unused —
 # STT_BACKEND=sherpa_onnx). Sources kept in repo (~1MB) for reference.
 
