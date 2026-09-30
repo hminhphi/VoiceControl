@@ -16,10 +16,10 @@ Environment:
   SPEAKER_TSE_ENABLED=0            enable TSE (default: 0)
   TSE_MODEL=MossFormer2_SS_16K     ClearVoice separation model
   TSE_REF_SEC=1.5                  reference window (start of turn) in seconds
-  TSE_CKPT_DIR=                    override ClearVoice checkpoints dir (optional)
 
-ClearVoice models auto-download on first use; pre-fetch with
-`scripts/fetch_assets.py tse` (downloads into voice_processing/clearvoice/checkpoints).
+ClearVoice models auto-download on first use into ./checkpoints (i.e.
+voice_processing/checkpoints); pre-fetch offline with
+`scripts/fetch_assets.py tse`.
 """
 from __future__ import annotations
 

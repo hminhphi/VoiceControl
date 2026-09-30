@@ -19,7 +19,7 @@ Subcommands:
     asr-whisper  sherpa-onnx Whisper (vi/en/ja) -> .../models/asr_whisper/
     asr-fw       faster-whisper CTranslate2     -> .../models/faster_whisper/
     tts-vi       Piper vi_VN (sherpa-onnx)      -> .../models/tts/
-    tse          ClearVoice separation/TSE      -> voice_processing/clearvoice/checkpoints/
+    tse          ClearVoice separation/TSE      -> voice_processing/checkpoints/
     speaker      pyannote diarization/embedding -> HF cache (gated, needs HF_TOKEN)
     wheels       Jetson aarch64 wheels          -> voice_processing/wheels/
     silero       nothing to download (tracked)  -> verifies silero_vad.onnx
@@ -81,9 +81,9 @@ PIPER_VI_URL = (
 )
 TTS_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "tts"
 
-# ClearVoice (speech separation / TSE) — checkpoints read from ./clearvoice/checkpoints
-# when the working dir is voice_processing.
-TSE_DIR = ROOT / "voice_processing" / "clearvoice" / "checkpoints"
+# ClearVoice (speech separation / TSE) — ClearVoice loads from ./checkpoints
+# relative to the working dir (voice_processing → /app in the container).
+TSE_DIR = ROOT / "voice_processing" / "checkpoints"
 CLEARVOICE_MODEL = "MossFormer2_SS_16K"
 
 # pyannote speaker diarization/embedding (models are gated on HuggingFace).
