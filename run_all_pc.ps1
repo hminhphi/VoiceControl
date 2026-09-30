@@ -141,9 +141,12 @@ function Start-VoiceHost {
         $lines += "`$env:STT_MODEL_TYPE = 'sense_voice'"
         $lines += "`$env:STT_LANGUAGE = 'auto'"
         $lines += "`$env:TTS_LANGUAGE = ''"
-        $lines += "`$env:FASTER_WHISPER_MODEL = '$VOICE_DIR\agent_assets\models\faster_whisper\large-v3'"
+        $lines += "`$env:WHISPER_MODEL = 'large-v3'"
         $lines += "`$env:FASTER_WHISPER_DEVICE = 'cuda'"
         $lines += "`$env:FASTER_WHISPER_COMPUTE = 'float16'"
+        # Same HF cache the x86 container uses (./cache/voice_processing -> /app/cache)
+        # so the prefetched Whisper model is shared (fetch_assets asr-fw).
+        $lines += "`$env:HF_HOME = '$ROOT\cache\voice_processing'"
         # cuBLAS/cuDNN for CTranslate2 (faster-whisper GPU) from the nvidia wheels
         $lines += "`$env:PATH = '$VENV_PC\Lib\site-packages\nvidia\cublas\bin;$VENV_PC\Lib\site-packages\nvidia\cudnn\bin;' + `$env:PATH"
         $lines += "`$env:STT_MODEL_DIR = '$VOICE_DIR\agent_assets\models\asr'"

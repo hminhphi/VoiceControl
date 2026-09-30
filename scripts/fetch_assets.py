@@ -17,7 +17,7 @@ Subcommands:
     kokoro       Kokoro v1.0 ONNX + voices      -> voice_processing/kokoro_tts/
     sherpa       SenseVoice ASR + KWS (delegates to voice_processing/download_models.py)
     asr-whisper  sherpa-onnx Whisper (vi/en/ja) -> .../models/asr_whisper/
-    asr-fw       faster-whisper CTranslate2     -> .../models/faster_whisper/
+    asr-fw       faster-whisper CTranslate2     -> HF cache (WHISPER_MODEL)
     tts-vi       Piper vi_VN (sherpa-onnx)      -> .../models/tts/
     tse          ClearVoice separation/TSE      -> voice_processing/checkpoints/
     speaker      pyannote diarization/embedding -> HF cache (gated, needs HF_TOKEN)
@@ -72,7 +72,16 @@ def _whisper_spec():
 
 
 # faster-whisper (CTranslate2) model dir — GPU multilingual ASR (vi/en/ja).
+# The unified config uses the model *name* (WHISPER_MODEL=large-v3), which
+# faster-whisper resolves from the HuggingFace cache, so we prefetch into the
+# cache (`models--Systran--faster-whisper-<size>`). FW_DIR is kept for optional
+# local-dir overrides via FASTER_WHISPER_MODEL.
 FW_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "faster_whisper"
+VOICE_CACHE = ROOT / "cache" / "voice_processing"
+# Same HF cache the voice container sees (./cache/voice_processing -> /app/cache),
+# so prefetched models are shared between host and Docker.
+os.environ.setdefault("HF_HOME", str(VOICE_CACHE))
+HF_CACHE = Path(os.environ["HF_HOME"]) / "hub"
 
 # Vietnamese TTS — sherpa-onnx Piper vi_VN (VITS).
 PIPER_VI_URL = (
@@ -94,7 +103,11 @@ PYANNOTE_REPOS = [
 ]
 
 WHISPER_SIZE, _, _ = _whisper_spec()
-FW_SIZE = (os.environ.get("FASTER_WHISPER_SIZE", "large-v3") or "large-v3").strip()
+FW_SIZE = (
+    os.environ.get("WHISPER_MODEL")
+    or os.environ.get("FASTER_WHISPER_SIZE")
+    or "large-v3"
+).strip()
 
 WHEELS_DIR = ROOT / "voice_processing" / "wheels"
 # All aarch64 wheels come from the NVIDIA Jetson index (JetPack 6 / CUDA 12.6).
@@ -157,7 +170,7 @@ EXPECTED = [
     # Multilingual ASR / TTS (x86; optional on Jetson)
     (WHISPER_DIR / f"{WHISPER_SIZE}-encoder.int8.onnx", 50_000_000),
     (WHISPER_DIR / f"{WHISPER_SIZE}-tokens.txt", None),
-    (FW_DIR / FW_SIZE, None),
+    (HF_CACHE / f"models--Systran--faster-whisper-{FW_SIZE}", None),
     (TTS_DIR / "vits-piper-vi_VN-vais1000-medium", None),
     # Target Speaker Extraction (ClearVoice separation)
     (TSE_DIR / CLEARVOICE_MODEL / "last_best_checkpoint.pt", 500_000_000),
@@ -353,18 +366,19 @@ def fetch_asr_whisper() -> None:
 
 
 def fetch_asr_fw() -> None:
-    size = (os.environ.get("FASTER_WHISPER_SIZE", "large-v3") or "large-v3").strip()
-    dest = FW_DIR / size
-    if dest.exists() and any(dest.iterdir()):
-        log(f"faster-whisper {size} present")
-        return
+    size = FW_SIZE
     try:
         from huggingface_hub import snapshot_download
     except ImportError:
         raise SystemExit("huggingface_hub required for asr-fw; pip install huggingface_hub")
-    log(f"faster-whisper {size}: Systran/faster-whisper-{size}")
-    snapshot_download(repo_id=f"Systran/faster-whisper-{size}", local_dir=str(dest))
-    log(f"  -> {_rel(dest)}")
+    repo = f"Systran/faster-whisper-{size}"
+    cached = HF_CACHE / f"models--{repo.replace('/', '--')}"
+    if cached.exists():
+        log(f"faster-whisper {size} present (HF cache)")
+        return
+    log(f"faster-whisper {size}: {repo} -> HF cache (WHISPER_MODEL={size})")
+    snapshot_download(repo_id=repo)
+    log(f"  -> {_rel(cached)}")
 
 
 def fetch_tse() -> None:
@@ -413,13 +427,13 @@ def verify() -> int:
     log("verifying assets...")
     for path, min_size in EXPECTED:
         if not path.exists():
-            print(f"  MISSING  {path.relative_to(ROOT)}")
+            print(f"  MISSING  {_rel(path)}")
             missing += 1
         elif min_size and path.stat().st_size < min_size:
-            print(f"  TOO SMALL {path.relative_to(ROOT)} ({path.stat().st_size} < {min_size})")
+            print(f"  TOO SMALL {_rel(path)} ({path.stat().st_size} < {min_size})")
             missing += 1
         else:
-            print(f"  ok       {path.relative_to(ROOT)}")
+            print(f"  ok       {_rel(path)}")
     log(f"{'ALL OK' if not missing else f'{missing} asset(s) missing'} — see docs/ASSETS.md")
     return 1 if missing else 0
 

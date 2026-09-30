@@ -194,13 +194,12 @@ services:
       - SPEAKER_TSE_ENABLED=${SPEAKER_TSE_ENABLED:-0}
       - TSE_MODEL=${TSE_MODEL:-MossFormer2_SS_16K}
       - TSE_REF_SEC=${TSE_REF_SEC:-1.5}
-      # STT — sherpa_onnx là default tốt nhất cho x86 offline
+      # STT — Whisper GPU, ĐỒNG NHẤT với Jetson (x86: faster-whisper/CUDA)
       # auto = detect the language per utterance (faster-whisper: vi/en/ja)
       - STT_BACKEND=${STT_BACKEND:-whisper}
-      - STT_MODEL=${STT_MODEL:-small.en}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - STT_LANGUAGE=${STT_LANGUAGE:-auto}
       # faster-whisper (GPU)
-      - FASTER_WHISPER_MODEL=${FASTER_WHISPER_MODEL:-/app/agent_assets/models/faster_whisper/large-v3}
       - FASTER_WHISPER_DEVICE=${FASTER_WHISPER_DEVICE:-cuda}
       - FASTER_WHISPER_COMPUTE=${FASTER_WHISPER_COMPUTE:-float16}
       - FASTER_WHISPER_BEAM=${FASTER_WHISPER_BEAM:-5}

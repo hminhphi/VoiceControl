@@ -32,8 +32,8 @@ services:
       - PULSE_LATENCY_MSEC=${PULSE_LATENCY_MSEC:-300}
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
-      - STT_BACKEND=${STT_BACKEND:-whisper_trt}
-      - STT_MODEL=${STT_MODEL:-small.en}
+      - STT_BACKEND=${STT_BACKEND:-whisper}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_STT_MODEL=${OPENAI_STT_MODEL:-gpt-4o-transcribe}
       - OPENAI_STT_TIMEOUT=${OPENAI_STT_TIMEOUT:-20}

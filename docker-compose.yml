@@ -237,9 +237,9 @@ services:
       - SPEAKER_TSE_ENABLED=${SPEAKER_TSE_ENABLED:-0}
       - TSE_MODEL=${TSE_MODEL:-MossFormer2_SS_16K}
       - TSE_REF_SEC=${TSE_REF_SEC:-1.5}
-      # STT backend selection
+      # STT — Whisper GPU (Jetson: TensorRT), ĐỒNG NHẤT với x86
       - STT_BACKEND=${STT_BACKEND:-whisper}
-      - STT_MODEL=${STT_MODEL:-small.en}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - STT_LANGUAGE=${STT_LANGUAGE:-}
       # sherpa-onnx STT (when STT_BACKEND=sherpa_onnx)
       - STT_MODEL_DIR=${STT_MODEL_DIR:-/app/agent_assets/models/asr}

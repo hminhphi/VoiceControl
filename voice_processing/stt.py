@@ -163,6 +163,20 @@ def _normalize_optional_language(language):
     return lang if len(lang) in (2, 3) and lang.isalpha() else None
 
 
+def _unified_whisper_model():
+    """Single Whisper model knob shared by x86 (faster-whisper) and Jetson (TRT).
+
+    `WHISPER_MODEL` is the primary name; `STT_MODEL`/`FASTER_WHISPER_MODEL`
+    remain as legacy overrides. Defaults to `large-v3` (multilingual vi/en/ja).
+    """
+    return (
+        os.environ.get("WHISPER_MODEL")
+        or os.environ.get("STT_MODEL")
+        or os.environ.get("FASTER_WHISPER_MODEL")
+        or "large-v3"
+    ).strip()
+
+
 def _float_samples_to_int16(samples):
     samples = np.asarray(samples, dtype=np.float32)
     return np.clip(samples * 32768.0, -32768, 32767).astype(np.int16)
@@ -739,7 +753,9 @@ class FasterWhisperBackend:
     language and returns it (drives the LLM/TTS language).
 
     Environment:
-        FASTER_WHISPER_MODEL    large-v3 | medium | small ... (default large-v3)
+        WHISPER_MODEL           large-v3 | medium | small ... (default large-v3)
+                                shared with Jetson TensorRT — keep identical
+        FASTER_WHISPER_MODEL    optional local dir override (legacy)
         FASTER_WHISPER_DEVICE   auto | cuda | cpu (default auto)
         FASTER_WHISPER_COMPUTE  float16 | int8_float16 | int8 | float32 (auto)
         FASTER_WHISPER_BEAM     beam size (default 5)
@@ -750,7 +766,15 @@ class FasterWhisperBackend:
         from faster_whisper import WhisperModel
 
         self.device_sample_rate = device_sample_rate
-        model_size = (os.environ.get("FASTER_WHISPER_MODEL", "large-v3") or "large-v3").strip()
+        # Unified model knob: WHISPER_MODEL (falls back to the legacy
+        # FASTER_WHISPER_MODEL/STT_MODEL, then large-v3). Same name on x86 & Jetson.
+        model_size = _unified_whisper_model()
+        # A local directory path is valid only if it exists; otherwise treat the
+        # basename as a model name (or large-v3) so we never crash on a stale path.
+        if ("/" in model_size or "\\" in model_size) and not os.path.isdir(model_size):
+            fallback = os.path.basename(model_size.rstrip("/\\")) or "large-v3"
+            print(f"[STT] faster-whisper model path not found: {model_size}; using {fallback!r}", flush=True)
+            model_size = fallback
         device = (os.environ.get("FASTER_WHISPER_DEVICE", "auto") or "auto").strip().lower()
         compute = (os.environ.get("FASTER_WHISPER_COMPUTE", "") or "").strip().lower()
         if not compute:
@@ -847,8 +871,10 @@ class STTProcessor:
         elif backend in ("whisper_trt", "trt"):
             try:
                 self.backend_name = "whisper_trt"
-                self.backend = WhisperTrtBackend(device_sample_rate, model_name, language)
-            except (ImportError, ModuleNotFoundError) as e:
+                self.backend = WhisperTrtBackend(
+                    device_sample_rate, _unified_whisper_model(model_name), language
+                )
+            except Exception as e:
                 print(f"[STT] whisper_trt not available ({e}); falling back to sherpa_onnx", flush=True)
                 self.backend_name = "sherpa_onnx"
                 self.backend = SherpaOnnxBackend(device_sample_rate, language=language)
@@ -870,12 +896,12 @@ class STTProcessor:
             try:
                 self.backend_name = "faster_whisper"
                 self.backend = FasterWhisperBackend(device_sample_rate, language=language)
-            except (ImportError, ModuleNotFoundError) as e:
+            except Exception as e:
                 print(f"[STT] faster_whisper unavailable ({e}); trying sherpa_whisper", flush=True)
                 try:
                     self.backend_name = "sherpa_whisper"
                     self.backend = SherpaWhisperBackend(device_sample_rate, language=language)
-                except (ImportError, ModuleNotFoundError, FileNotFoundError) as e2:
+                except Exception as e2:
                     print(f"[STT] sherpa_whisper unavailable ({e2}); using sherpa_onnx", flush=True)
                     self.backend_name = "sherpa_onnx"
                     self.backend = SherpaOnnxBackend(device_sample_rate, language=language)
@@ -901,21 +927,22 @@ class STTProcessor:
           3. faster-whisper CPU
           4. sherpa-onnx Whisper -> SenseVoice
         """
+        wmodel = _unified_whisper_model()
         try:
             import tensorrt  # noqa: F401
             try:
-                return "whisper_trt", WhisperTrtBackend(device_sample_rate, model_name, language)
+                return "whisper_trt", WhisperTrtBackend(device_sample_rate, wmodel, language)
             except Exception as e:
                 print(f"[STT] whisper_trt unavailable ({e}); trying faster-whisper", flush=True)
         except Exception:
             pass
         try:
             return "faster_whisper", FasterWhisperBackend(device_sample_rate, language=language)
-        except (ImportError, ModuleNotFoundError) as e:
+        except Exception as e:
             print(f"[STT] faster_whisper unavailable ({e}); trying sherpa_whisper", flush=True)
         try:
             return "sherpa_whisper", SherpaWhisperBackend(device_sample_rate, language=language)
-        except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
+        except Exception as e:
             print(f"[STT] sherpa_whisper unavailable ({e}); using sherpa_onnx", flush=True)
         return "sherpa_onnx", SherpaOnnxBackend(device_sample_rate, language=language)
 

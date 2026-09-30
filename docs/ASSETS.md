@@ -37,11 +37,12 @@ public defaults need it).
 - The GGUF is a public stand-in (`unsloth/Qwen3.5-4B-GGUF`). If you need the
   team's private fine-tune instead, drop it into `llama-cpp/models/` and set
   `LLM_MODEL_FILE` in `.env` accordingly.
-- `fetch_assets asr-fw` downloads the **faster-whisper** (CTranslate2) model in
-  `FASTER_WHISPER_SIZE` (default `large-v3`; also `medium`/`small`) to
-  `.../models/faster_whisper/<size>`. This is the x86 GPU ASR, selected by the
-  unified `STT_BACKEND=whisper` (Jetson uses TensorRT `whisper_trt` instead).
-  Set `FASTER_WHISPER_MODEL` to that directory path.
+- `fetch_assets asr-fw` prefetches the **faster-whisper** (CTranslate2) model
+  `WHISPER_MODEL` (default `large-v3`; also `medium`/`small`) into the
+  HuggingFace cache (`models--Systran--faster-whisper-<size>`), so the unified
+  `STT_BACKEND=whisper` works offline. It is the x86 GPU runtime; Jetson uses
+  TensorRT (`whisper_trt`) with the same model name. To use a local directory
+  instead, set `FASTER_WHISPER_MODEL` to an existing path.
 - `fetch_assets asr-whisper` downloads the size in `STT_WHISPER_MODEL`
   (default `small`; also `tiny`/`base`/`medium`). Whisper is multilingual with
   automatic language detection but **slower** than SenseVoice — measured on CPU

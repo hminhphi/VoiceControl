@@ -126,13 +126,17 @@ Cấu hình liên quan trong `.env.x86`:
 ```dotenv
 STT_BACKEND=whisper
 STT_LANGUAGE=auto
-FASTER_WHISPER_MODEL=/app/agent_assets/models/faster_whisper/large-v3
+WHISPER_MODEL=large-v3          # CHUNG với Jetson (TensorRT dùng cùng tên model)
 FASTER_WHISPER_DEVICE=cuda
 FASTER_WHISPER_COMPUTE=float16
 # TTS_LANGUAGE=              # để trống = nói theo ngôn ngữ từng lượt
 PIPER_VI_DIR=/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium
 ```
 
+> Model faster-whisper được tải vào `cache/voice_processing/hub` — **dùng chung**
+> giữa host mode và Docker (container mount `./cache/voice_processing` →
+> `/app/cache`, cùng `HF_HOME`), nên chỉ tải một lần.
+>
 > Để ép một ngôn ngữ cố định, đặt `TTS_LANGUAGE=en` (hoặc `ja`/`vi`). Ngôn ngữ
 > Kokoro/chưa hỗ trợ (Hàn) hiện dùng giọng Anh dự phòng.
 
