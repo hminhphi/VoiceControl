@@ -1,95 +1,62 @@
-@startuml Runtime - voice pipeline (GPU-first)
-' Orchestrator-on-Edge · full runtime flow
-title Orchestrator-on-Edge · Voice pipeline (runtime)
+@startuml Runtime - block diagram
+title Orchestrator-on-Edge · Runtime pipeline (block diagram)
+left to right direction
+skinparam rectangle {
+  BackgroundColor #F5F9FF
+  BorderColor #4F9EFF
+  RoundCorner 12
+}
+skinparam ArrowColor #4F9EFF
 
-|#E3F2FD|Audio in|
-start
-:Capture mic @ AUDIO_SAMPLE_RATE (sounddevice);
-:AEC · NS · HPF · transient · AGC2\n(WebRTC APM, webrtc_apm native);
-note right
-  AEC khử echo (cần far-end = loa);
-  NS/AGC nâng giọng cho model.
-  Env: AEC_*, NS linear, AGC1 (tùy chọn)
-end note
+rectangle "1 · THU ÂM\nmic 16k (sounddevice)" as A
+rectangle "2 · TIỀN XỬ LÝ\nAEC khử echo · NS giảm ồn · HPF\nAGC nâng giọng (WebRTC APM)" as B
+rectangle "3 · VAD\nphát hiện tiếng nói (Silero)" as C
+rectangle "4 · WAKE WORD\n'Hey Dora' hoặc follow-up" as D
+rectangle "5 · CẮT LƯỢT\nchốt segment 1s · hết câu 1s\ngate năng lượng STT_MIN_RMS" as E
+rectangle "6 · STT\nfaster-whisper GPU · vi/en/ja\ntự nhận ngôn ngữ" as F
+rectangle "7 · LỌC NHIỄU/HALLUCINATION\nbỏ 'Yeah.', '(beeps)', câu bịa" as G
+rectangle "8 · SPEAKER (opt-in)\ndiarization + overlap\nTSE tách người đang nói" as H
+rectangle "9 · LLM\nđịnh tuyến + gọi tool\ntrả lời ĐÚNG ngôn ngữ" as I
+rectangle "10 · TTS\nKokoro en/ja · Piper vi (GPU)" as J
+rectangle "11 · PHÁT & TƯƠNG TÁC\nbarge-in · follow-up 12s" as K
 
-|#E8F5E9|VAD + Wake|
-:Silero VAD (dual-threshold, VAD_WINDOW_SIZE);
-if (wake word "Hey Dora" HOẶC follow-up window?) then (yes)
-  :capture command (giữ pre-roll SPEECH_PREROLL_SEC);
-
-|#FFF3E0|STT|
-  while (im lặng < TURN_END_SILENCE) is (đang nói)
-    :tích lũy audio;
-    if (im lặng ≥ SEGMENT_SILENCE) then (yes)
-      if (RMS ≥ STT_MIN_RMS) then (yes)
-        :STT · faster-whisper large-v3 (CUDA)\nvi/en/ja · auto language;
-        :lọc hallucination + no_speech/avg_logprob;
-      else (no)
-        :bỏ đoạn năng lượng thấp;
-      endif
-    endif
-  endwhile (im lặng ≥ TURN_END_SILENCE → hết lượt)
-  note right: TURN_END_SILENCE=1.0s · SEGMENT_SILENCE=1.0s
-
-|#F3E5F5|Speaker (opt-in)|
-  if (SPEAKER_ENABLED?) then (yes)
-    :diarization + overlap (pyannote · CUDA);
-  endif
-  if (overlap ≥ SPEAKER_OVERLAP_MIN?) then (yes)
-    if (SPEAKER_TSE_ENABLED?) then (yes)
-      :TSE: separation (ClearVoice MossFormer2_SS_16K · CUDA);
-      :chọn target stream → STT lại trên stream sạch;
-    else (no)
-      if (SPEAKER_GATE_OVERLAP?) then (yes)
-        :TTS "có nhiều người nói, nhắc lại";
-        stop
-      endif
-    endif
-  endif
-
-|#E1F5FE|Orchestrator + LLM|
-  :POST /v1/orchestrator/message\n{message, session_id, language};
-  :LLM tool-calling (llama-server :8080)\n+ language directive (en/ja/vi);
-  if (tool call?) then (yes)
-    :car_control / car_manual (A2A);
-  endif
-  :stream tokens qua WebSocket;
-
-|#FFF8E1|TTS + playback|
-  while (token stream) is (còn câu)
-    :gom câu → TTS\n(Kokoro en/ja · Piper vi);
-  endwhile
-  :playback (16k, chunked);
-  note right
-    Barge-in: nói chen → abort;
-    Follow-up: nghe tiếp FOLLOWUP_LISTEN_SEC (12s)
-  end note
-else (no)
-  :chờ wake word;
-endif
-stop
+A --> B
+B --> C
+C --> D
+D --> E
+E --> F
+F --> G
+G --> H
+G --> I
+H --> I
+I --> J
+J --> K
 @enduml
 
 
-@startuml Deployment - services & ports
-title Services & ports (Jetson arm64 / amd64)
+@startuml Services - block diagram
+title Services (block diagram) — mỗi khối là 1 việc
+left to right direction
+skinparam rectangle {
+  BackgroundColor #F6FFF8
+  BorderColor #22C55E
+  RoundCorner 12
+}
+skinparam ArrowColor #22C55E
 
-actor "Người dùng" as U
-rectangle "voice_processing\n(host audio, GPU CUDA)" as VP
-rectangle "Orchestrator :8000\nFastyAPI · tool-calling" as ORCH
-database "llama-server :8080\nQwen3.5-4B GGUF (GPU)" as LLM
-rectangle "car_control :8001" as CC
-rectangle "car_manual :8002\n(RAG + embedding)" as CM
-rectangle "navigation :8003" as NAV
-rectangle "infotainment :8004" as INFO
-rectangle "cloud :8005" as CL
-rectangle "car_control_ui :8010\n(dev/sim)" as UI
-rectangle "frontend :3000\n(optional)" as FE
+rectangle "voice_processing\nMic → STT/TTS → loa\n(host audio · GPU)" as VP
+rectangle "Orchestrator :8000\nphân tích ý định · gọi agent\ntổng hợp câu trả lời" as ORCH
+rectangle "llama-server :8080\nsinh ngôn ngữ (Qwen3.5-4B GGUF)" as LLM
+rectangle "car_control :8001\nđiều khiển cửa/cốp/đèn/AC\n(mô phỏng hoặc CAN)" as CC
+rectangle "car_manual :8002\ntra cứu tài liệu xe (RAG)" as CM
+rectangle "navigation :8003\nPOI + chỉ đường" as NAV
+rectangle "infotainment :8004\nnhạc + chuyện cười" as INFO
+rectangle "cloud :8005\ntìm kiếm web" as CL
+rectangle "car_control_ui :8010\nmô phỏng xe (dev)" as UI
+rectangle "frontend :3000\nchat web (tùy chọn)" as FE
 
-U --> VP : micro / loa
-VP --> ORCH : HTTP + WebSocket\n(text + language hint)
-VP -->|- ORCH : A2A reply stream
-ORCH --> LLM : OpenAI-compatible
+VP --> ORCH : text + language
+ORCH --> LLM : hỏi đáp
 ORCH --> CC
 ORCH --> CM
 ORCH --> NAV
@@ -100,16 +67,28 @@ FE --> ORCH
 @enduml
 
 
-@startuml Build and deploy
-title Asset fetch → Jetson bundle → run
-start
-:scripts/fetch_assets (llm, embed, kokoro, asr-fw, tts-vi, tse, wheels);
-:scripts/pack_jetson (arm64, loại x86-only);
-:dist/orchestrator-on-edge-jetson-<date>.zip;
-:copy lên Jetson (scp / USB);
-:unzip · cp .env.example .env;
-:build: l4t-jetpack → l4t-base → services;
-:./run_all.sh (audio · llama-server · docker compose);
-:tmux orch_edge (llama · bluetooth · stack · audit);
-stop
+@startuml Build - block diagram
+title Build & deploy (block diagram)
+left to right direction
+skinparam rectangle {
+  BackgroundColor #FFFBEB
+  BorderColor #F59E0B
+  RoundCorner 12
+}
+skinparam ArrowColor #F59E0B
+
+rectangle "fetch_assets\ntải model + wheels\n(GGUF, STT, TTS, TSE)" as A
+rectangle "pack_jetson\nđóng gói arm64\nloại file x86" as B
+rectangle "jar zip\norchestrator-on-edge-jetson-<date>.zip" as C
+rectangle "copy → Jetson\nscp / USB" as D
+rectangle "unzip + .env\ncp .env.example .env" as E
+rectangle "build image\nl4t-base → services" as F
+rectangle "run_all.sh\naudio · llama-server · compose" as G
+
+A --> B
+B --> C
+C --> D
+D --> E
+E --> F
+F --> G
 @enduml
