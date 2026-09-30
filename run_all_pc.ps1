@@ -74,6 +74,10 @@ $VENV_BASE   = Join-Path $ROOT ".venvs"
 $VENV_PC     = Join-Path $VENV_BASE "pc"
 $ENV_FILE    = Join-Path $ROOT ".env.x86"
 $COMPOSE_X86 = Join-Path $ROOT "docker-compose.x86.yml"
+# Always use the amd64 env file so compose interpolation doesn't pick the
+# Jetson .env by accident.
+$COMPOSE_X86_ARGS = @("-f", $COMPOSE_X86)
+if (Test-Path $ENV_FILE) { $COMPOSE_X86_ARGS += @("--env-file", $ENV_FILE) }
 
 # ── Ports ──────────────────────────────────────────────────────────────────────
 $PORT_ORCH   = 8000
@@ -93,7 +97,7 @@ if ($Down) {
     Write-Header "Stopping all services..."
     if (Test-Path $COMPOSE_X86) {
         Write-Step "Stopping Docker containers..."
-        docker compose -f $COMPOSE_X86 down 2>$null | Out-Null
+        docker compose @COMPOSE_X86_ARGS down 2>$null | Out-Null
     }
     Write-Step "Stopping any host service launchers..."
     Get-Process -Name "python*", "pwsh*" -ErrorAction SilentlyContinue | Where-Object {
@@ -220,7 +224,7 @@ if ($Docker) {
     }
 
     Write-Header "Starting Docker Compose services: $($servicesToStart -join ', ')..."
-    docker compose -f $COMPOSE_X86 up -d $servicesToStart
+    docker compose @COMPOSE_X86_ARGS up -d $servicesToStart
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Failed to start Docker Compose services."
         exit 1
@@ -283,7 +287,7 @@ if ($Docker) {
 # Ensure old conflicting Docker containers are stopped
 Write-Step "Ensuring Docker containers are stopped to free ports..."
 if (Test-Path $COMPOSE_X86) {
-    docker compose -f $COMPOSE_X86 down 2>$null | Out-Null
+    docker compose @COMPOSE_X86_ARGS down 2>$null | Out-Null
 }
 
 # ── Detect Python ─────────────────────────────────────────────────────────────

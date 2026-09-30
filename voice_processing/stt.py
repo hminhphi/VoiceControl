@@ -769,6 +769,9 @@ class FasterWhisperBackend:
         )
         try:
             self.model = WhisperModel(model_size, device=device, compute_type=compute)
+            # Warmup: CUDA libs (cuBLAS/cuDNN) are loaded lazily on first run, so
+            # force a tiny decode now to surface failures and fall back to CPU.
+            list(self.model.transcribe(np.zeros(1600, dtype=np.float32))[0])
         except Exception as e:
             if device != "cpu":
                 print(f"[STT] faster-whisper {device}/{compute} failed ({e}); retry cpu/int8", flush=True)
@@ -858,8 +861,18 @@ class STTProcessor:
                 language,
             )
         elif backend in ("faster_whisper", "fasterwhisper", "ct2", "whisper_ct2"):
-            self.backend_name = "faster_whisper"
-            self.backend = FasterWhisperBackend(device_sample_rate, language=language)
+            try:
+                self.backend_name = "faster_whisper"
+                self.backend = FasterWhisperBackend(device_sample_rate, language=language)
+            except (ImportError, ModuleNotFoundError) as e:
+                print(f"[STT] faster_whisper unavailable ({e}); trying sherpa_whisper", flush=True)
+                try:
+                    self.backend_name = "sherpa_whisper"
+                    self.backend = SherpaWhisperBackend(device_sample_rate, language=language)
+                except (ImportError, ModuleNotFoundError, FileNotFoundError) as e2:
+                    print(f"[STT] sherpa_whisper unavailable ({e2}); using sherpa_onnx", flush=True)
+                    self.backend_name = "sherpa_onnx"
+                    self.backend = SherpaOnnxBackend(device_sample_rate, language=language)
         elif backend in ("sherpa_whisper", "whisper_sherpa", "whisper_onnx", "whisper_multilingual"):
             self.backend_name = "sherpa_whisper"
             self.backend = SherpaWhisperBackend(device_sample_rate, language=language)
