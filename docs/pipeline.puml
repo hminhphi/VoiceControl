@@ -1,0 +1,115 @@
+@startuml Runtime - voice pipeline (GPU-first)
+' Orchestrator-on-Edge · full runtime flow
+title Orchestrator-on-Edge · Voice pipeline (runtime)
+
+|#E3F2FD|Audio in|
+start
+:Capture mic @ AUDIO_SAMPLE_RATE (sounddevice);
+:AEC · NS · HPF · transient · AGC2\n(WebRTC APM, webrtc_apm native);
+note right
+  AEC khử echo (cần far-end = loa);
+  NS/AGC nâng giọng cho model.
+  Env: AEC_*, NS linear, AGC1 (tùy chọn)
+end note
+
+|#E8F5E9|VAD + Wake|
+:Silero VAD (dual-threshold, VAD_WINDOW_SIZE);
+if (wake word "Hey Dora" HOẶC follow-up window?) then (yes)
+  :capture command (giữ pre-roll SPEECH_PREROLL_SEC);
+
+|#FFF3E0|STT|
+  while (im lặng < TURN_END_SILENCE) is (đang nói)
+    :tích lũy audio;
+    if (im lặng ≥ SEGMENT_SILENCE) then (yes)
+      if (RMS ≥ STT_MIN_RMS) then (yes)
+        :STT · faster-whisper large-v3 (CUDA)\nvi/en/ja · auto language;
+        :lọc hallucination + no_speech/avg_logprob;
+      else (no)
+        :bỏ đoạn năng lượng thấp;
+      endif
+    endif
+  endwhile (im lặng ≥ TURN_END_SILENCE → hết lượt)
+  note right: TURN_END_SILENCE=1.0s · SEGMENT_SILENCE=1.0s
+
+|#F3E5F5|Speaker (opt-in)|
+  if (SPEAKER_ENABLED?) then (yes)
+    :diarization + overlap (pyannote · CUDA);
+  endif
+  if (overlap ≥ SPEAKER_OVERLAP_MIN?) then (yes)
+    if (SPEAKER_TSE_ENABLED?) then (yes)
+      :TSE: separation (ClearVoice MossFormer2_SS_16K · CUDA);
+      :chọn target stream → STT lại trên stream sạch;
+    else (no)
+      if (SPEAKER_GATE_OVERLAP?) then (yes)
+        :TTS "có nhiều người nói, nhắc lại";
+        stop
+      endif
+    endif
+  endif
+
+|#E1F5FE|Orchestrator + LLM|
+  :POST /v1/orchestrator/message\n{message, session_id, language};
+  :LLM tool-calling (llama-server :8080)\n+ language directive (en/ja/vi);
+  if (tool call?) then (yes)
+    :car_control / car_manual (A2A);
+  endif
+  :stream tokens qua WebSocket;
+
+|#FFF8E1|TTS + playback|
+  while (token stream) is (còn câu)
+    :gom câu → TTS\n(Kokoro en/ja · Piper vi);
+  endwhile
+  :playback (16k, chunked);
+  note right
+    Barge-in: nói chen → abort;
+    Follow-up: nghe tiếp FOLLOWUP_LISTEN_SEC (12s)
+  end note
+else (no)
+  :chờ wake word;
+endif
+stop
+@enduml
+
+
+@startuml Deployment - services & ports
+title Services & ports (Jetson arm64 / amd64)
+
+actor "Người dùng" as U
+rectangle "voice_processing\n(host audio, GPU CUDA)" as VP
+rectangle "Orchestrator :8000\nFastyAPI · tool-calling" as ORCH
+database "llama-server :8080\nQwen3.5-4B GGUF (GPU)" as LLM
+rectangle "car_control :8001" as CC
+rectangle "car_manual :8002\n(RAG + embedding)" as CM
+rectangle "navigation :8003" as NAV
+rectangle "infotainment :8004" as INFO
+rectangle "cloud :8005" as CL
+rectangle "car_control_ui :8010\n(dev/sim)" as UI
+rectangle "frontend :3000\n(optional)" as FE
+
+U --> VP : micro / loa
+VP --> ORCH : HTTP + WebSocket\n(text + language hint)
+VP -->|- ORCH : A2A reply stream
+ORCH --> LLM : OpenAI-compatible
+ORCH --> CC
+ORCH --> CM
+ORCH --> NAV
+ORCH --> INFO
+ORCH --> CL
+CC --> UI
+FE --> ORCH
+@enduml
+
+
+@startuml Build and deploy
+title Asset fetch → Jetson bundle → run
+start
+:scripts/fetch_assets (llm, embed, kokoro, asr-fw, tts-vi, tse, wheels);
+:scripts/pack_jetson (arm64, loại x86-only);
+:dist/orchestrator-on-edge-jetson-<date>.zip;
+:copy lên Jetson (scp / USB);
+:unzip · cp .env.example .env;
+:build: l4t-jetpack → l4t-base → services;
+:./run_all.sh (audio · llama-server · docker compose);
+:tmux orch_edge (llama · bluetooth · stack · audit);
+stop
+@enduml

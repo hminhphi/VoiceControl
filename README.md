@@ -243,6 +243,9 @@ python test/run_tests.py
 
 | Document | Purpose |
 |----------|---------|
+| [`docs/PIPELINE.md`](docs/PIPELINE.md) | Full pipeline (PlantUML flow) + finalized config |
+| [`docs/BENCHMARK.md`](docs/BENCHMARK.md) | ASR benchmark (FLEURS + MUSAN: vi/en/ja, noise, overlap, TSE) |
+| [`docs/SPEAKER_OVERLAP.md`](docs/SPEAKER_OVERLAP.md) | Multi-speaker / overlap research + OSD/TSE design |
 | [`DEPLOY.md`](DEPLOY.md) | Deploy the bundle to a Jetson |
 | [`docs/PC_SETUP.md`](docs/PC_SETUP.md) | End-user PC setup (Windows / amd64) |
 | [`docs/DEV_SETUP.md`](docs/DEV_SETUP.md) | Developer setup (Docker + host mode + stubs) |
