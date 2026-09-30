@@ -99,6 +99,80 @@ Mỗi service mở trong cửa sổ riêng (tiêu đề `[(service)]`). Docker m
 | UI mô phỏng xe (Docker mode) | http://localhost:8010 |
 | Web chat (profile `optional`) | http://localhost:3000 |
 
+## 8. Đa ngôn ngữ (Anh / Nhật / Việt)
+
+Trên x86, pipeline nhận **tiếng Anh, Nhật, Việt** và trả lời bằng TTS đúng
+ngôn ngữ đó (dựa trên kiến trúc [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)):
+
+- **STT**: **faster-whisper** (`STT_BACKEND=faster_whisper`, CTranslate2) —
+  chính xác nhất, chạy **GPU**, một model nhận cả vi/en/ja và tự phát hiện ngôn
+  ngữ. Dự phòng: `sherpa_whisper` (CPU) hoặc `sherpa_onnx` (SenseVoice).
+- **Ngôn ngữ lượt nói**: lấy từ kết quả STT, truyền thẳng sang orchestrator
+  (`language` hint) để LLM **trả lời đúng ngôn ngữ**; `voice_processing/lang.py`
+  là dự phòng.
+- **TTS**: tiếng Anh `af_heart`, tiếng Nhật `jf_alpha` + `misaki[ja]` (Kokoro);
+  tiếng Việt dùng **Piper vi_VN** (sherpa-onnx VITS).
+
+Tải model đa ngữ (một lần):
+
+```powershell
+.\scripts\fetch_assets.ps1 asr-fw       # faster-whisper large-v3 (~3 GB, GPU)
+.\scripts\fetch_assets.ps1 tts-vi       # Piper tiếng Việt (~60 MB)
+```
+
+Cấu hình liên quan trong `.env.x86`:
+
+```dotenv
+STT_BACKEND=faster_whisper
+STT_LANGUAGE=auto
+FASTER_WHISPER_MODEL=/app/agent_assets/models/faster_whisper/large-v3
+FASTER_WHISPER_DEVICE=cuda
+FASTER_WHISPER_COMPUTE=float16
+# TTS_LANGUAGE=              # để trống = nói theo ngôn ngữ từng lượt
+PIPER_VI_DIR=/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium
+```
+
+> Để ép một ngôn ngữ cố định, đặt `TTS_LANGUAGE=en` (hoặc `ja`/`vi`). Ngôn ngữ
+> Kokoro/chưa hỗ trợ (Hàn) hiện dùng giọng Anh dự phòng.
+
+**Tốc độ STT:** Whisper đa ngữ chậm hơn SenseVoice (đo trên CPU int8, audio
+7.15 s): SenseVoice 0.20 s (RTF 0.03) vs Whisper-small 1.94 s (RTF 0.27). Muốn
+nhanh hơn thì dùng model nhỏ hơn:
+
+```powershell
+$env:STT_WHISPER_MODEL="base"     # hoặc "tiny"; mặc định "small"
+.\scripts\fetch_assets.ps1 asr-whisper
+# rồi đặt STT_WHISPER_MODEL=base trong .env.x86
+```
+
+Whisper vẫn nhanh hơn thời gian thực (RTF < 1). ASR **không streaming** — pipeline
+cắt theo VAD rồi nhận dạng từng đoạn (offline), giống trước; chỉ có phần trả lời
+(orchestrator token + phát TTS theo chunk) là streaming.
+
+## 9. GPU (tùy chọn)
+
+Chọn execution provider bằng env (mặc định `cpu`, tự fallback cpu nếu không có):
+
+| Biến | Dùng cho | Ghi chú |
+|------|----------|---------|
+| `ONNX_PROVIDER` | Kokoro TTS, Silero VAD | `cuda` cần `onnxruntime-gpu` (đã có trong base) |
+| `SHERPA_PROVIDER` | sherpa ASR (SenseVoice/Whisper) + wake word | **chỉ `cuda` nếu sherpa-onnx build GPU** |
+| `VAD_PROVIDER` | Silero VAD | nên giữ `cpu` (model nhỏ, GPU chậm hơn) |
+
+- **Kokoro TTS**: hỗ trợ GPU sẵn — tự dùng `CUDAExecutionProvider` khi có.
+- **sherpa-onnx ASR**: bản PyPI là **CPU-only**. Muốn GPU phải build từ source với
+  `-DSHERPA_ONNX_ENABLE_GPU=ON` (hoặc wheel GPU trên Jetson) rồi đặt `SHERPA_PROVIDER=cuda`.
+  Nếu chưa có GPU build, sherpa chỉ cảnh báo và chạy CPU (không lỗi).
+- **VAD / wake word**: rất nhỏ, chạy GPU thêm overhead → để CPU.
+
+Ví dụ bật Kokoro trên GPU (x86):
+
+```dotenv
+ONNX_PROVIDER=cuda
+SHERPA_PROVIDER=cpu   # trừ khi có sherpa-onnx GPU build
+VAD_PROVIDER=cpu
+```
+
 ## 8. Kiểm tra nhanh
 
 ```powershell

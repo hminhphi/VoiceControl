@@ -47,15 +47,29 @@ class VADProcessor:
         self._threshold_high = float(os.environ.get("VAD_THRESHOLD_HIGH", "0.55"))
         self._threshold_low = float(os.environ.get("VAD_THRESHOLD_LOW", "0.20"))
 
-        # ONNX session — CPU provider is sufficient for tiny silero model
+        # Provider configurable via VAD_PROVIDER / ONNX_PROVIDER (default cpu).
+        # CPU is the sane default for this tiny model: GPU adds per-chunk overhead.
+        provider = (os.environ.get("VAD_PROVIDER") or os.environ.get("ONNX_PROVIDER") or "cpu").strip().lower()
+        if provider in ("gpu", "cuda"):
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
-        self.session = onnxruntime.InferenceSession(
-            MODEL_PATH,
-            providers=["CPUExecutionProvider"],
-            sess_options=opts,
-        )
+        try:
+            self.session = onnxruntime.InferenceSession(
+                MODEL_PATH, providers=providers, sess_options=opts,
+            )
+        except Exception as e:
+            if providers != ["CPUExecutionProvider"]:
+                print(f"[VAD] provider {provider} unavailable ({e}); using cpu", flush=True)
+                self.session = onnxruntime.InferenceSession(
+                    MODEL_PATH, providers=["CPUExecutionProvider"], sess_options=opts,
+                )
+            else:
+                raise
+        print(f"[VAD] Providers: {self.session.get_providers()}", flush=True)
 
         # Persistent GRU hidden state (2, 1, 128) and context (1, 64)
         self._h = np.zeros((2, 1, 128), dtype=np.float32)

@@ -23,6 +23,9 @@ public defaults need it).
 | Kokoro TTS `kokoro-v1.0.onnx`, `voices-v1.0.bin` | no (345 MB) | `voice_processing/kokoro_tts/` | HF `mikkoph/kokoro-onnx` (mirror) | `fetch_assets kokoro` |
 | sherpa SenseVoice ASR | no (234 MB) | `voice_processing/agent_assets/models/asr/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
 | sherpa KWS (zipformer) | no (~40 MB) | `voice_processing/agent_assets/models/kws/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
+| **faster-whisper** (CTranslate2) vi/en/ja, GPU | no (~3 GB, large-v3) | `voice_processing/agent_assets/models/faster_whisper/` | HF `Systran/faster-whisper-<size>` | `fetch_assets asr-fw` |
+| Whisper multilingual ASR (vi/en/ja) | no (~360 MB) | `voice_processing/agent_assets/models/asr_whisper/` | HF `csukuangfj/sherpa-onnx-whisper-small` | `fetch_assets asr-whisper` |
+| Vietnamese TTS (Piper vi_VN) | no (~60 MB) | `voice_processing/agent_assets/models/tts/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets tts-vi` |
 | Silero VAD `silero_vad.onnx` | **yes** (2.3 MB) | `voice_processing/agent_assets/models/` | `silero-vad` pip package | `fetch_assets silero` |
 | Wake words `hey_*.onnx` | **yes** (~0.8 MB) | `voice_processing/agent_assets/models/` | custom-trained (openWakeWord) | tracked |
 | Jetson wheels — torch 2.8.0, torchvision 0.23.0, torchaudio 2.8.0, onnxruntime_gpu 1.23.0 | no (~317 MB) | `voice_processing/wheels/` | Jetson index `pypi.jetson-ai-lab.io/jp6/cu126` (JetPack 6 / CUDA 12.6) | `fetch_assets wheels` |
@@ -32,6 +35,16 @@ public defaults need it).
 - The GGUF is a public stand-in (`unsloth/Qwen3.5-4B-GGUF`). If you need the
   team's private fine-tune instead, drop it into `llama-cpp/models/` and set
   `LLM_MODEL_FILE` in `.env` accordingly.
+- `fetch_assets asr-fw` downloads the **faster-whisper** (CTranslate2) model in
+  `FASTER_WHISPER_SIZE` (default `large-v3`; also `medium`/`small`) to
+  `.../models/faster_whisper/<size>`. This is the recommended ASR for accurate
+  vi/en/ja on GPU (`STT_BACKEND=faster_whisper`). Set `FASTER_WHISPER_MODEL` to
+  that directory path.
+- `fetch_assets asr-whisper` downloads the size in `STT_WHISPER_MODEL`
+  (default `small`; also `tiny`/`base`/`medium`). Whisper is multilingual with
+  automatic language detection but **slower** than SenseVoice — measured on CPU
+  (int8, 2 threads, 7.15 s audio): SenseVoice 0.20 s (RTF 0.03) vs Whisper-small
+  1.94 s (RTF 0.27). Use `base`/`tiny` for lower latency.
 - `fetch_assets wheels` downloads each wheel by pinned URL + **sha256** from the
   NVIDIA Jetson index (`pypi.jetson-ai-lab.io/jp6/cu126`); no `pip` is required,
   and a mismatched build is detected and replaced. The pinned versions/sizes

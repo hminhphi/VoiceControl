@@ -16,6 +16,9 @@ OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions"
 ELEVENLABS_STT_MODEL = "scribe_v2_realtime"
 ELEVENLABS_STT_URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
 DEFAULT_OPENAI_STT_PROMPT = "The audio is entirely in English. Transcribe only in English."
+WHISPER_ASR_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "agent_assets", "models", "asr_whisper"
+)
 _WHISPER_CACHE_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "cache", "whisper_trt"
 )
@@ -83,6 +86,34 @@ def _env_bool(name, default=False):
     if value is None or value == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _sherpa_provider() -> str:
+    """Execution provider for sherpa-onnx: cpu | cuda.
+
+    Env: SHERPA_PROVIDER (falls back to ONNX_PROVIDER, default cpu).
+    GPU requires a CUDA-enabled sherpa-onnx build; otherwise it falls back
+    to cpu automatically (see _build_recognizer).
+    """
+    val = (os.environ.get("SHERPA_PROVIDER") or os.environ.get("ONNX_PROVIDER") or "cpu").strip().lower()
+    if val in ("gpu", "cuda"):
+        return "cuda"
+    return "cpu"
+
+
+def _build_recognizer(factory, **kwargs):
+    """Create a sherpa recognizer with the configured provider, cpu fallback."""
+    provider = _sherpa_provider()
+    kwargs["provider"] = provider
+    try:
+        return factory(**kwargs)
+    except Exception as e:
+        if provider != "cpu":
+            print(f"[STT] sherpa provider={provider} unavailable ({e}); using cpu", flush=True)
+            kwargs["provider"] = "cpu"
+            return factory(**kwargs)
+        raise
+
 
 
 def _normalize_optional_language(language):
@@ -514,7 +545,8 @@ class SherpaOnnxBackend:
         lang_arg = "" if self.language in ("auto", None, "") else self.language
 
         if model_type == "paraformer":
-            self._model = sherpa_onnx.OfflineRecognizer.from_paraformer(
+            self._model = _build_recognizer(
+                sherpa_onnx.OfflineRecognizer.from_paraformer,
                 paraformer=model_path,
                 tokens=tokens_path,
                 num_threads=2,
@@ -524,7 +556,8 @@ class SherpaOnnxBackend:
                 debug=False,
             )
         else:  # sense_voice (default)
-            self._model = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            self._model = _build_recognizer(
+                sherpa_onnx.OfflineRecognizer.from_sense_voice,
                 model=model_path,
                 tokens=tokens_path,
                 num_threads=2,
@@ -567,6 +600,181 @@ class SherpaOnnxBackend:
         }
 
 
+class SherpaWhisperBackend:
+    """Offline multilingual ASR via sherpa-onnx Whisper.
+
+    A single Whisper model covers vi/en/ja (and more) and reports the detected
+    language, so it also drives TTS language selection. Files come from
+    ``csukuangfj/sherpa-onnx-whisper-<size>``:
+        <prefix>-encoder.int8.onnx, <prefix>-decoder.int8.onnx, <prefix>-tokens.txt
+
+    Environment:
+        STT_WHISPER_DIR    model directory (default: agent_assets/models/asr_whisper)
+        STT_WHISPER_MODEL  filename prefix, e.g. small/tiny/base (default: small)
+        STT_WHISPER_INT8   use int8 weights (default: 1)
+        STT_LANGUAGE       force a language; empty/auto = auto-detect
+    """
+
+    def __init__(self, device_sample_rate: int, language: str | None = None):
+        self.device_sample_rate = device_sample_rate
+
+        import sherpa_onnx
+
+        model_dir = os.environ.get(
+            "STT_WHISPER_DIR",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "agent_assets", "models", "asr_whisper"),
+        )
+        prefix = (os.environ.get("STT_WHISPER_MODEL", "small") or "small").strip()
+        suffix = ".int8.onnx" if _env_bool("STT_WHISPER_INT8", True) else ".onnx"
+        encoder = os.path.join(model_dir, f"{prefix}-encoder{suffix}")
+        decoder = os.path.join(model_dir, f"{prefix}-decoder{suffix}")
+        tokens = os.path.join(model_dir, f"{prefix}-tokens.txt")
+        for p in (encoder, decoder, tokens):
+            if not os.path.isfile(p):
+                raise FileNotFoundError(
+                    f"[STT][whisper] model file not found: {p}\n"
+                    "Fetch it with: scripts/fetch_assets.py asr-whisper"
+                )
+
+        lang = (
+            os.environ.get("STT_LANGUAGE")
+            or os.environ.get("STT_LANG")
+            or language
+            or ""
+        ).strip().lower()
+        self.language = "" if lang in ("", "auto") else lang
+
+        print(
+            f"[STT] Loading sherpa-onnx Whisper ({prefix}): {model_dir} "
+            f"(lang={self.language or 'auto'})",
+            flush=True,
+        )
+        self._model = _build_recognizer(
+            sherpa_onnx.OfflineRecognizer.from_whisper,
+            encoder=encoder,
+            decoder=decoder,
+            tokens=tokens,
+            language=self.language,
+            task="transcribe",
+            num_threads=2,
+            debug=False,
+        )
+        print("[STT] sherpa-onnx Whisper ready", flush=True)
+
+    def transcribe(self, audio_int16):
+        samples = resample_audio(audio_int16, self.device_sample_rate, STT_SAMPLE_RATE)
+        rms, peak = _audio_metrics(samples)
+
+        s = self._model.create_stream()
+        s.accept_waveform(STT_SAMPLE_RATE, samples)
+        self._model.decode_stream(s)
+        res = s.result
+        text = (getattr(res, "text", "") or "").strip()
+        lang = getattr(res, "lang", None) or None
+
+        print(
+            f"[STT][debug] backend=sherpa_whisper samples={len(samples)} "
+            f"rms={rms:.5f} peak={peak:.5f} lang={lang}"
+        )
+        try:
+            print(f"[STT][debug] text={text!r}")
+        except Exception:
+            pass
+        return {
+            "text": text,
+            "language": lang,
+            "raw_text": text,
+            "forced_language": self.language or None,
+            "generated_language": lang,
+            "sample_count": len(samples),
+            "rms": rms,
+            "peak": peak,
+        }
+
+
+class FasterWhisperBackend:
+    """Multilingual ASR via faster-whisper (CTranslate2) — accurate + GPU.
+
+    Recommended for vi/en/ja accuracy on a GPU (e.g. large-v3). Auto-detects
+    language and returns it (drives the LLM/TTS language).
+
+    Environment:
+        FASTER_WHISPER_MODEL    large-v3 | medium | small ... (default large-v3)
+        FASTER_WHISPER_DEVICE   auto | cuda | cpu (default auto)
+        FASTER_WHISPER_COMPUTE  float16 | int8_float16 | int8 | float32 (auto)
+        FASTER_WHISPER_BEAM     beam size (default 5)
+        STT_LANGUAGE            force a language; empty/auto = auto-detect
+    """
+
+    def __init__(self, device_sample_rate: int, language: str | None = None):
+        from faster_whisper import WhisperModel
+
+        self.device_sample_rate = device_sample_rate
+        model_size = (os.environ.get("FASTER_WHISPER_MODEL", "large-v3") or "large-v3").strip()
+        device = (os.environ.get("FASTER_WHISPER_DEVICE", "auto") or "auto").strip().lower()
+        compute = (os.environ.get("FASTER_WHISPER_COMPUTE", "") or "").strip().lower()
+        if not compute:
+            compute = "float16" if device in ("cuda", "auto") else "int8"
+
+        lang = (
+            os.environ.get("STT_LANGUAGE") or os.environ.get("STT_LANG") or language or ""
+        ).strip().lower()
+        self.language = "" if lang in ("", "auto") else lang
+        self.beam_size = int(os.environ.get("FASTER_WHISPER_BEAM", "5"))
+
+        print(
+            f"[STT] Loading faster-whisper {model_size} device={device} "
+            f"compute={compute} (lang={self.language or 'auto'})",
+            flush=True,
+        )
+        try:
+            self.model = WhisperModel(model_size, device=device, compute_type=compute)
+        except Exception as e:
+            if device != "cpu":
+                print(f"[STT] faster-whisper {device}/{compute} failed ({e}); retry cpu/int8", flush=True)
+                self.model = WhisperModel(model_size, device="cpu", compute_type="int8")
+            else:
+                raise
+        print("[STT] faster-whisper ready", flush=True)
+
+    def transcribe(self, audio_int16):
+        samples = resample_audio(audio_int16, self.device_sample_rate, STT_SAMPLE_RATE)
+        rms, peak = _audio_metrics(samples)
+
+        segments, info = self.model.transcribe(
+            samples,
+            language=self.language or None,
+            beam_size=self.beam_size,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
+            temperature=0.0,
+        )
+        text = "".join(seg.text for seg in segments).strip()
+        lang = getattr(info, "language", None)
+        prob = getattr(info, "language_probability", None)
+
+        print(
+            f"[STT][debug] backend=faster_whisper samples={len(samples)} "
+            f"rms={rms:.5f} peak={peak:.5f} lang={lang} prob={prob}"
+        )
+        try:
+            print(f"[STT][debug] text={text!r}")
+        except Exception:
+            pass
+        return {
+            "text": text,
+            "language": lang,
+            "raw_text": text,
+            "forced_language": self.language or None,
+            "generated_language": lang,
+            "sample_count": len(samples),
+            "rms": rms,
+            "peak": peak,
+        }
+
+
 class STTProcessor:
     def __init__(self, device_sample_rate, model_name="small", language=None):
         default_backend = "sherpa_onnx" if os.name == "nt" else "whisper_trt"
@@ -594,13 +802,19 @@ class STTProcessor:
                 model_name,
                 language,
             )
+        elif backend in ("faster_whisper", "fasterwhisper", "ct2", "whisper_ct2"):
+            self.backend_name = "faster_whisper"
+            self.backend = FasterWhisperBackend(device_sample_rate, language=language)
+        elif backend in ("sherpa_whisper", "whisper_sherpa", "whisper_onnx", "whisper_multilingual"):
+            self.backend_name = "sherpa_whisper"
+            self.backend = SherpaWhisperBackend(device_sample_rate, language=language)
         elif backend in ("sherpa_onnx", "sherpa", "sense_voice", "sensevoice"):
             self.backend_name = "sherpa_onnx"
             self.backend = SherpaOnnxBackend(device_sample_rate, language=language)
         else:
             raise ValueError(
                 f"Unsupported STT_BACKEND={backend!r}; "
-                "expected whisper_trt, nemotron, openai, elevenlabs, or sherpa_onnx"
+                "expected whisper_trt, faster_whisper, sherpa_whisper, nemotron, openai, elevenlabs, or sherpa_onnx"
             )
 
     def transcribe(self, audio_int16):

@@ -221,6 +221,10 @@ services:
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
+      # Execution providers: cpu | cuda (GPU needs CUDA-enabled onnxruntime/sherpa)
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}
+      - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}
+      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
       # STT backend selection
       - STT_BACKEND=${STT_BACKEND:-whisper_trt}
       - STT_MODEL=${STT_MODEL:-small.en}

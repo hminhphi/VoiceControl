@@ -54,6 +54,28 @@ KOKORO_REPO = "mikkoph/kokoro-onnx"  # HF mirror of thewh1teagle/kokoro-onnx rel
 KOKORO_DIR = ROOT / "voice_processing" / "kokoro_tts"
 KOKORO_FILES = ["kokoro-v1.0.onnx", "voices-v1.0.bin"]
 
+# Multilingual ASR (vi/en/ja + auto language detection) — sherpa-onnx Whisper.
+# Size is chosen by STT_WHISPER_MODEL (tiny|base|small|medium), default small.
+WHISPER_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "asr_whisper"
+
+
+def _whisper_spec():
+    size = (os.environ.get("STT_WHISPER_MODEL", "small") or "small").strip().lower()
+    repo = f"csukuangfj/sherpa-onnx-whisper-{size}"
+    files = [f"{size}-encoder.int8.onnx", f"{size}-decoder.int8.onnx", f"{size}-tokens.txt"]
+    return size, repo, files
+
+
+# faster-whisper (CTranslate2) model dir — GPU multilingual ASR (vi/en/ja).
+FW_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "faster_whisper"
+
+# Vietnamese TTS — sherpa-onnx Piper vi_VN (VITS).
+PIPER_VI_URL = (
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/"
+    "tts-models/vits-piper-vi_VN-vais1000-medium.tar.bz2"
+)
+TTS_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "tts"
+
 WHEELS_DIR = ROOT / "voice_processing" / "wheels"
 # All aarch64 wheels come from the NVIDIA Jetson index (JetPack 6 / CUDA 12.6).
 # Pinned by sha256 to the known-good r36.4 bundle so a mismatched build can never
@@ -296,6 +318,43 @@ def fetch_wheels() -> None:
         download_url(f"{WHEELS_INDEX}/{w['rel']}", dest, sha256=w["sha256"])
 
 
+def fetch_asr_whisper() -> None:
+    size, repo, files = _whisper_spec()
+    log(f"Whisper ASR ({size}, multilingual vi/en/ja): {repo}")
+    for fn in files:
+        hf_download(repo, fn, WHISPER_DIR / fn)
+
+
+def fetch_asr_fw() -> None:
+    size = (os.environ.get("FASTER_WHISPER_SIZE", "large-v3") or "large-v3").strip()
+    dest = FW_DIR / size
+    if dest.exists() and any(dest.iterdir()):
+        log(f"faster-whisper {size} present")
+        return
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        raise SystemExit("huggingface_hub required for asr-fw; pip install huggingface_hub")
+    log(f"faster-whisper {size}: Systran/faster-whisper-{size}")
+    snapshot_download(repo_id=f"Systran/faster-whisper-{size}", local_dir=str(dest))
+    log(f"  -> {_rel(dest)}")
+
+
+def fetch_tts_vi() -> None:
+    dest = TTS_DIR / "vits-piper-vi_VN-vais1000-medium"
+    if dest.exists() and any(dest.glob("*.onnx")):
+        log("Piper vi_VN present (tracked? no — downloaded)")
+        return
+    log("Vietnamese TTS (Piper vi_VN, sherpa-onnx VITS)")
+    TTS_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as td:
+        archive = Path(td) / "piper_vi.tar.bz2"
+        download_url(PIPER_VI_URL, archive)
+        with tarfile.open(archive, "r:bz2") as tar:
+            tar.extractall(TTS_DIR)
+    log(f"  -> {_rel(dest)}")
+
+
 def verify() -> int:
     missing = 0
     log("verifying assets...")
@@ -316,12 +375,15 @@ SUBCOMMANDS = {
     "llm": fetch_llm,
     "embed": fetch_embed,
     "kokoro": fetch_kokoro,
+    "asr-whisper": fetch_asr_whisper,
+    "asr-fw": fetch_asr_fw,
+    "tts-vi": fetch_tts_vi,
     "sherpa": fetch_sherpa,
     "silero": fetch_silero,
     "wheels": fetch_wheels,
     "verify": verify,
 }
-ORDER = ["llm", "embed", "kokoro", "sherpa", "silero", "wheels"]
+ORDER = ["llm", "embed", "kokoro", "asr-fw", "asr-whisper", "tts-vi", "sherpa", "silero", "wheels"]
 
 
 def main() -> int:

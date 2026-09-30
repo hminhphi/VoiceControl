@@ -94,7 +94,9 @@ class _SherpaBackend:
             if not os.path.isfile(f):
                 raise FileNotFoundError(f"[wake_word][sherpa] missing: {f}")
 
-        self._spotter = sherpa_onnx.KeywordSpotter(
+        provider = (os.environ.get("SHERPA_PROVIDER") or os.environ.get("ONNX_PROVIDER") or "cpu").strip().lower()
+        provider = "cuda" if provider in ("gpu", "cuda") else "cpu"
+        spotter_kwargs = dict(
             tokens=tokens,
             encoder=encoder,
             decoder=decoder,
@@ -107,8 +109,17 @@ class _SherpaBackend:
             keywords_score=1.8,
             keywords_threshold=detect_threshold,
             num_trailing_blanks=1,
-            provider="cpu",
+            provider=provider,
         )
+        try:
+            self._spotter = sherpa_onnx.KeywordSpotter(**spotter_kwargs)
+        except Exception as e:
+            if provider != "cpu":
+                print(f"[wake_word][sherpa] provider={provider} unavailable ({e}); using cpu", flush=True)
+                spotter_kwargs["provider"] = "cpu"
+                self._spotter = sherpa_onnx.KeywordSpotter(**spotter_kwargs)
+            else:
+                raise
         self._stream = self._spotter.create_stream()
         self._frame_length = SHERPA_CHUNK
         self._cooldown = 1.5

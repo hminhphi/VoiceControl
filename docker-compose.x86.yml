@@ -174,11 +174,28 @@ services:
       # Orchestrator
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
-      - TTS_LANGUAGE=${TTS_LANGUAGE:-en}
+      # Empty = speak the language detected per turn (en/ja/vi)
+      - TTS_LANGUAGE=${TTS_LANGUAGE:-}
+      # Vietnamese TTS (sherpa-onnx Piper)
+      - PIPER_VI_DIR=${PIPER_VI_DIR:-/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium}
+      # Execution providers: cpu | cuda (GPU needs CUDA-enabled onnxruntime/sherpa)
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}       # Kokoro TTS / VAD
+      - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word
+      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
       # STT — sherpa_onnx là default tốt nhất cho x86 offline
-      - STT_BACKEND=${STT_BACKEND:-sherpa_onnx}
+      # auto = detect the language per utterance (faster-whisper: vi/en/ja)
+      - STT_BACKEND=${STT_BACKEND:-faster_whisper}
       - STT_MODEL=${STT_MODEL:-small.en}
-      - STT_LANGUAGE=${STT_LANGUAGE:-en}
+      - STT_LANGUAGE=${STT_LANGUAGE:-auto}
+      # faster-whisper (GPU)
+      - FASTER_WHISPER_MODEL=${FASTER_WHISPER_MODEL:-/app/agent_assets/models/faster_whisper/large-v3}
+      - FASTER_WHISPER_DEVICE=${FASTER_WHISPER_DEVICE:-cuda}
+      - FASTER_WHISPER_COMPUTE=${FASTER_WHISPER_COMPUTE:-float16}
+      - FASTER_WHISPER_BEAM=${FASTER_WHISPER_BEAM:-5}
+      # fallback: sherpa-onnx Whisper
+      - STT_WHISPER_DIR=${STT_WHISPER_DIR:-/app/agent_assets/models/asr_whisper}
+      - STT_WHISPER_MODEL=${STT_WHISPER_MODEL:-small}
+      - STT_WHISPER_INT8=${STT_WHISPER_INT8:-1}
       - STT_MODEL_DIR=${STT_MODEL_DIR:-/app/agent_assets/models/asr}
       - STT_MODEL_TYPE=${STT_MODEL_TYPE:-sense_voice}
       # Wake word

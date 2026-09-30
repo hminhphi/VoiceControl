@@ -27,10 +27,12 @@ def send_and_stream(
     n_chunks=5,
     post_timeout=30,
     ws_timeout=60,
+    language=None,
 ):
     """
     POST user_message to orchestrator, then consume WebSocket stream.
     Flush to TTS on sentence end (. ! ?) or on done/error.
+    `language` is the STT-detected language hint so the LLM replies in-language.
     """
     base_url = base_url or os.environ.get("ORCHESTRATOR_URL", "http://localhost:8000")
     base_url = base_url.rstrip("/")
@@ -38,10 +40,14 @@ def send_and_stream(
     post_url = f"{base_url}/v1/orchestrator/message"
     ws_url = _parse_ws_url(base_url) + f"/v1/orchestrator/ws/{session_id}"
 
+    payload = {"message": user_message, "session_id": session_id}
+    if language:
+        payload["language"] = language
+
     try:
         r = requests.post(
             post_url,
-            json={"message": user_message, "session_id": session_id},
+            json=payload,
             timeout=post_timeout,
             headers={"Content-Type": "application/json"},
         )

@@ -56,6 +56,9 @@ EXCLUDE_DIR_NAMES = {
 # Exact relative directories to skip.
 EXCLUDE_DIR_REL = {
     "voice_processing/cache", "voice_processing/input_test", "voice_processing/output",
+    "voice_processing/agent_assets/models/asr_whisper",
+    "voice_processing/agent_assets/models/faster_whisper",
+    "voice_processing/agent_assets/models/tts",
     "voice_processing/torch2trt/build", "voice_processing/torch2trt/dist",
     "voice_processing/whisper_trt/build", "voice_processing/whisper_trt/dist",
     "cache/orchestrator/xet", "cache/car_manual/xet",

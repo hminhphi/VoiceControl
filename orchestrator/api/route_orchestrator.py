@@ -81,6 +81,7 @@ POST_PROCESSORS = {
 class MessageRequest(BaseModel):
     message: str
     session_id: str = "default"
+    language: str | None = None  # STT-detected language hint (en/ja/vi/ko/zh)
  
  
 class AgentResponse(BaseModel):
@@ -734,6 +735,27 @@ def _detect_lang(text: str) -> str:
     return "en"
 
 
+# Explicit, model-independent language directive for the active tool-calling path
+# (the local LLM does not reliably follow the generic "user's language" hint).
+_LANGUAGE_DIRECTIVES = {
+    "vi": "Luôn trả lời bằng tiếng Việt, kể cả khi câu hỏi trộn nhiều ngôn ngữ.",
+    "ja": "必ず日本語のみで回答してください。質問が他言語でも日本語で答えてください。",
+    "en": "Always answer in English, even if the question mixes languages.",
+}
+
+
+def _language_directive(lang: str) -> str:
+    return _LANGUAGE_DIRECTIVES.get(lang, _LANGUAGE_DIRECTIVES["en"])
+
+
+def _normalize_lang_hint(lang) -> str | None:
+    """Accept an STT language hint (en/ja/vi/ko/zh or locale) and normalize it."""
+    if not lang:
+        return None
+    base = str(lang).strip().lower().replace("_", "-").split("-")[0]
+    return base if base in ("en", "ja", "vi", "ko", "zh") else None
+
+
 # ── STT phonetic auto-correction (chunk→trunk etc.) ─────────────────────
 # Runs BEFORE LLM tool-calling so the model never sees the typo.
 STT_CORRECTIONS: list[tuple[re.Pattern, str]] = [
@@ -853,7 +875,7 @@ CAR_ACTION_CMD_MAP = {
 }
 
 
-async def process_request_tool_calling(session_id: str, user_message: str):
+async def process_request_tool_calling(session_id: str, user_message: str, language: str | None = None):
     logger.info("Processing tool-calling request session_id=%s, message=%r", session_id, user_message)
 
     # ── STT auto-correction before any routing/LLM ──────────────────
@@ -877,12 +899,16 @@ async def process_request_tool_calling(session_id: str, user_message: str):
         now = _get_local_now()
         now_str = now.strftime("%A, %B %d, %Y %I:%M %p")
 
-        user_lang = _detect_lang(user_message)
+        user_lang = _normalize_lang_hint(language) or _detect_lang(user_message)
 
         messages = [
             {
                 "role": "system",
-                "content": f"{DORA_TOOL_SYSTEM_PROMPT}\n\nContext:\nCurrent local time and date: {now_str}",
+                "content": (
+                    f"{DORA_TOOL_SYSTEM_PROMPT}\n\n"
+                    f"{_language_directive(user_lang)}\n\n"
+                    f"Context:\nCurrent local time and date: {now_str}"
+                ),
             },
             {"role": "user", "content": user_message},
         ]
@@ -1111,7 +1137,7 @@ async def post_message(req: MessageRequest):
     # Pure LLM Tool-Calling background task
     logger.info(f"Starting background tool-calling task for session_id={session_id}")
     asyncio.create_task(
-        process_request_tool_calling(session_id, user_message)
+        process_request_tool_calling(session_id, user_message, req.language)
     )
  
     return MessageAccepted(

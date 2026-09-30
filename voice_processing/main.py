@@ -44,6 +44,7 @@ from wake_word import WakeWordProcessor
 from vad import VADProcessor
 from stt import STTProcessor
 from tts import TTSProcessor
+from lang import detect_lang
 from orchestrator_client import send_and_stream
 from aec import AecEngine
 
@@ -552,12 +553,15 @@ def run():
                             print(f"[STT][debug] saved empty segment: {saved_path}")
                     if part:
                         turn_texts.append(part)
-                    if out.get("language"):
-                        turn_lang = out.get("language")
+                    seg_lang = out.get("language")
+                    if not seg_lang or str(seg_lang).strip().lower() in ("", "auto", "none"):
+                        seg_lang = detect_lang(part) if part else None
+                    if seg_lang:
+                        turn_lang = seg_lang
                     print(
                         f"[STT] Segment done audio_dur={dur:.2f}s "
                         f"infer={time.time()-t0:.2f}s text={part!r} "
-                        f"lang={out.get('language')}"
+                        f"lang={seg_lang}"
                     )
                     continue
                 if not text:
@@ -586,6 +590,7 @@ def run():
                             session_id,
                             on_segment,
                             n_chunks=TTS_CHUNK_COUNT,
+                            language=lang,
                         )
                         # Wait until every queued segment is synthesized, then
                         # until its audio has finished playing.

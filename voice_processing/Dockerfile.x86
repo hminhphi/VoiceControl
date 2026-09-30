@@ -39,13 +39,23 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # ── 4. STT backends ───────────────────────────────────────────
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --no-build-isolation \
-        openai-whisper==20240927 \
-    && python3 -m pip install \
+    python3 -m pip install \
         "transformers>=5.13.0" \
         accelerate \
         safetensors \
         librosa
+# faster-whisper (CTranslate2) — accurate multilingual vi/en/ja on GPU.
+# Install with --no-deps so it does NOT pull the CPU onnxruntime and break
+# onnxruntime-gpu; its runtime deps are installed explicitly. onnxruntime-gpu
+# (already present) satisfies faster-whisper's optional VAD import.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-deps faster-whisper \
+    && python3 -m pip install \
+        "ctranslate2>=4.5.0" \
+        huggingface_hub \
+        tokenizers \
+        av \
+        tqdm
 
 # ── 5. TTS (Kokoro ONNX — x86 compatible) ────────────────────
 # kokoro-onnx works on x86_64; espeak-ng provides phonemization
@@ -58,6 +68,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install \
         "espeakng-loader>=0.2.4" \
         "phonemizer-fork>=3.3.2" \
+        "misaki[ja]" \
         kokoro-onnx
 
 # ── 6. torch2trt NOT needed on x86 ───────────────────────────

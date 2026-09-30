@@ -43,6 +43,9 @@ voice_processing/wheels/*.whl
 voice_processing/kokoro_tts/*.onnx
 voice_processing/kokoro_tts/*.bin
 voice_processing/agent_assets/models/asr/
+voice_processing/agent_assets/models/asr_whisper/
+voice_processing/agent_assets/models/faster_whisper/
+voice_processing/agent_assets/models/tts/
 voice_processing/agent_assets/models/kws/*.onnx
 
 # ── Build / distribution outputs ────────────────────────────
