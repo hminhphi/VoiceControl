@@ -24,6 +24,8 @@ public defaults need it).
 | sherpa SenseVoice ASR | no (234 MB) | `voice_processing/agent_assets/models/asr/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
 | sherpa KWS (zipformer) | no (~40 MB) | `voice_processing/agent_assets/models/kws/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
 | **faster-whisper** (CTranslate2) vi/en/ja, GPU | no (~3 GB, large-v3) | `voice_processing/agent_assets/models/faster_whisper/` | HF `Systran/faster-whisper-<size>` | `fetch_assets asr-fw` |
+| **ClearVoice** separation/TSE (MossFormer2_SS_16K) | no (~670 MB) | `voice_processing/clearvoice/checkpoints/` | HF `alibabasglab/MossFormer2_SS_16K` | `fetch_assets tse` |
+| **pyannote** diarization/embedding | no | HF cache | HF `pyannote/*` (**gated**, cần `HF_TOKEN`) | `fetch_assets speaker` |
 | Whisper multilingual ASR (vi/en/ja) | no (~360 MB) | `voice_processing/agent_assets/models/asr_whisper/` | HF `csukuangfj/sherpa-onnx-whisper-small` | `fetch_assets asr-whisper` |
 | Vietnamese TTS (Piper vi_VN) | no (~60 MB) | `voice_processing/agent_assets/models/tts/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets tts-vi` |
 | Silero VAD `silero_vad.onnx` | **yes** (2.3 MB) | `voice_processing/agent_assets/models/` | `silero-vad` pip package | `fetch_assets silero` |

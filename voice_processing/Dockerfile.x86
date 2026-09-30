@@ -75,7 +75,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # pyannote.audio runs on the CUDA torch already present in x86-base.
 # Models are gated on HuggingFace: set SPEAKER_HF_TOKEN (or HF_TOKEN) at runtime.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install "pyannote.audio>=3.1.0"
+    python3 -m pip install "pyannote.audio>=3.1.0" clearvoice
 
 # ── 6. torch2trt NOT needed on x86 ───────────────────────────
 # whisper_trt uses TRT — not available on non-Jetson.

@@ -12,13 +12,18 @@ Usage (from the repo root):
     python scripts/fetch_assets.py verify
 
 Subcommands:
-    llm      Qwen3.5-4B Q4_K_M GGUF         -> llama-cpp/models/
-    embed    sentence-transformers MiniLM   -> cache/orchestrator/hub/
-    kokoro   Kokoro v1.0 ONNX + voices      -> voice_processing/kokoro_tts/
-    sherpa   SenseVoice ASR + KWS (delegates to voice_processing/download_models.py)
-    wheels   Jetson aarch64 wheels          -> voice_processing/wheels/
-    silero   nothing to download (tracked)  -> verifies silero_vad.onnx
-    verify   check every expected asset exists
+    llm          Qwen3.5-4B Q4_K_M GGUF         -> llama-cpp/models/
+    embed        sentence-transformers MiniLM   -> cache/orchestrator/hub/
+    kokoro       Kokoro v1.0 ONNX + voices      -> voice_processing/kokoro_tts/
+    sherpa       SenseVoice ASR + KWS (delegates to voice_processing/download_models.py)
+    asr-whisper  sherpa-onnx Whisper (vi/en/ja) -> .../models/asr_whisper/
+    asr-fw       faster-whisper CTranslate2     -> .../models/faster_whisper/
+    tts-vi       Piper vi_VN (sherpa-onnx)      -> .../models/tts/
+    tse          ClearVoice separation/TSE      -> voice_processing/clearvoice/checkpoints/
+    speaker      pyannote diarization/embedding -> HF cache (gated, needs HF_TOKEN)
+    wheels       Jetson aarch64 wheels          -> voice_processing/wheels/
+    silero       nothing to download (tracked)  -> verifies silero_vad.onnx
+    verify       check every expected asset exists
 
 Environment:
     HF_TOKEN        HuggingFace token (only needed for gated/private repos)
@@ -75,6 +80,21 @@ PIPER_VI_URL = (
     "tts-models/vits-piper-vi_VN-vais1000-medium.tar.bz2"
 )
 TTS_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "tts"
+
+# ClearVoice (speech separation / TSE) — checkpoints read from ./clearvoice/checkpoints
+# when the working dir is voice_processing.
+TSE_DIR = ROOT / "voice_processing" / "clearvoice" / "checkpoints"
+CLEARVOICE_MODEL = "MossFormer2_SS_16K"
+
+# pyannote speaker diarization/embedding (models are gated on HuggingFace).
+PYANNOTE_REPOS = [
+    "pyannote/embedding",
+    "pyannote/segmentation-3.0",
+    "pyannote/speaker-diarization-community-1",
+]
+
+WHISPER_SIZE, _, _ = _whisper_spec()
+FW_SIZE = (os.environ.get("FASTER_WHISPER_SIZE", "large-v3") or "large-v3").strip()
 
 WHEELS_DIR = ROOT / "voice_processing" / "wheels"
 # All aarch64 wheels come from the NVIDIA Jetson index (JetPack 6 / CUDA 12.6).
@@ -134,6 +154,13 @@ EXPECTED = [
     (WHEELS_DIR / "torchvision-0.23.0-cp310-cp310-linux_aarch64.whl", 1_500_000),
     (WHEELS_DIR / "torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl", 2_000_000),
     (WHEELS_DIR / "onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl", 87_000_000),
+    # Multilingual ASR / TTS (x86; optional on Jetson)
+    (WHISPER_DIR / f"{WHISPER_SIZE}-encoder.int8.onnx", 50_000_000),
+    (WHISPER_DIR / f"{WHISPER_SIZE}-tokens.txt", None),
+    (FW_DIR / FW_SIZE, None),
+    (TTS_DIR / "vits-piper-vi_VN-vais1000-medium", None),
+    # Target Speaker Extraction (ClearVoice separation)
+    (TSE_DIR / CLEARVOICE_MODEL / "last_best_checkpoint.pt", 500_000_000),
 ]
 
 
@@ -340,6 +367,32 @@ def fetch_asr_fw() -> None:
     log(f"  -> {_rel(dest)}")
 
 
+def fetch_tse() -> None:
+    dest = TSE_DIR / CLEARVOICE_MODEL
+    log(f"ClearVoice TSE checkpoint: alibabasglab/{CLEARVOICE_MODEL}")
+    for fn in ("last_best_checkpoint.pt", "last_best_checkpoint", "README.md"):
+        try:
+            hf_download(f"alibabasglab/{CLEARVOICE_MODEL}", fn, dest / fn)
+        except Exception as e:
+            log(f"  [warn] {fn}: {e}")
+
+
+def fetch_speaker() -> None:
+    token = os.environ.get("HF_TOKEN")
+    if not token:
+        log("pyannote models are GATED on HuggingFace.")
+        log("  1) accept conditions at https://huggingface.co/pyannote/embedding")
+        log("  2) run: HF_TOKEN=hf_xxx python scripts/fetch_assets.py speaker")
+        return
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore
+    except ImportError:
+        raise SystemExit("huggingface_hub required for speaker; pip install huggingface_hub")
+    for repo in PYANNOTE_REPOS:
+        log(f"download {repo} -> HF cache")
+        snapshot_download(repo_id=repo, token=token)
+
+
 def fetch_tts_vi() -> None:
     dest = TTS_DIR / "vits-piper-vi_VN-vais1000-medium"
     if dest.exists() and any(dest.glob("*.onnx")):
@@ -378,12 +431,14 @@ SUBCOMMANDS = {
     "asr-whisper": fetch_asr_whisper,
     "asr-fw": fetch_asr_fw,
     "tts-vi": fetch_tts_vi,
+    "tse": fetch_tse,
+    "speaker": fetch_speaker,
     "sherpa": fetch_sherpa,
     "silero": fetch_silero,
     "wheels": fetch_wheels,
     "verify": verify,
 }
-ORDER = ["llm", "embed", "kokoro", "asr-fw", "asr-whisper", "tts-vi", "sherpa", "silero", "wheels"]
+ORDER = ["llm", "embed", "kokoro", "asr-fw", "asr-whisper", "tts-vi", "tse", "speaker", "sherpa", "silero", "wheels"]
 
 
 def main() -> int:

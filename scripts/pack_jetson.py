@@ -59,6 +59,7 @@ EXCLUDE_DIR_REL = {
     "voice_processing/agent_assets/models/asr_whisper",
     "voice_processing/agent_assets/models/faster_whisper",
     "voice_processing/agent_assets/models/tts",
+    "voice_processing/clearvoice",
     "voice_processing/tools/audio_lab/recordings",
     "voice_processing/torch2trt/build", "voice_processing/torch2trt/dist",
     "voice_processing/whisper_trt/build", "voice_processing/whisper_trt/dist",

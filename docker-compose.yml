@@ -233,6 +233,10 @@ services:
       - SPEAKER_HF_TOKEN=${SPEAKER_HF_TOKEN:-}
       - SPEAKER_GATE_OVERLAP=${SPEAKER_GATE_OVERLAP:-0}
       - SPEAKER_OVERLAP_MIN=${SPEAKER_OVERLAP_MIN:-0.15}
+      # Target Speaker Extraction (separation + target select) on overlap
+      - SPEAKER_TSE_ENABLED=${SPEAKER_TSE_ENABLED:-0}
+      - TSE_MODEL=${TSE_MODEL:-MossFormer2_SS_16K}
+      - TSE_REF_SEC=${TSE_REF_SEC:-1.5}
       # STT backend selection
       - STT_BACKEND=${STT_BACKEND:-whisper_trt}
       - STT_MODEL=${STT_MODEL:-small.en}

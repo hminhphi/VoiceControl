@@ -139,6 +139,17 @@ SPEAKER_GATE_OVERLAP=1            # overlap >= ngưỡng -> xin nhắc lại
 SPEAKER_OVERLAP_MIN=0.15
 ```
 
-**TSE thật (tách giọng target khỏi hỗn hợp)** vẫn là bước mở rộng — dùng
-`ClearerVoice-Studio` (Apache-2.0, torch CUDA) với reference = mẫu giọng wake-word;
-chưa tích hợp (cần thêm model + đo trên thiết bị).
+**TSE (Target Speaker Extraction) — đã tích hợp (opt-in, GPU):**
+`voice_processing/tse.py` dùng **ClearVoice `MossFormer2_SS_16K`** để **tách** hỗn
+hợp thành 2 stream rồi **chọn stream của target** theo embedding (fallback: stream
+to nhất). Bật `SPEAKER_TSE_ENABLED=1`: khi có overlap, pipeline tách → chọn target
+→ **STT lại** trên stream sạch → gửi LLM (thay vì gửi audio lẫn).
+
+```dotenv
+SPEAKER_TSE_ENABLED=1
+TSE_MODEL=MossFormer2_SS_16K
+TSE_REF_SEC=1.5
+```
+
+Tải model: `scripts/fetch_assets.py tse` (ClearVoice) và `scripts/fetch_assets.py speaker`
+(pyannote diarization/embedding — **gated**, cần `HF_TOKEN` + accept điều khoản).

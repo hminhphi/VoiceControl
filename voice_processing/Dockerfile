@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Models are gated on HuggingFace: accept the model conditions and set
 # SPEAKER_HF_TOKEN (or HF_TOKEN) at runtime.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install "pyannote.audio>=3.1.0"
+    python3 -m pip install "pyannote.audio>=3.1.0" clearvoice
 
 # ── 8. torch2trt + whisper_trt ─────────────────────────────────
 # REMOVED 2026-09: only needed to build whisper_trt engines (unused —

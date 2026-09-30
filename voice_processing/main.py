@@ -46,6 +46,7 @@ from stt import STTProcessor
 from tts import TTSProcessor
 from lang import detect_lang
 from speaker import get_analyzer, clarify_message
+from tse import get_extractor
 from orchestrator_client import send_and_stream
 from aec import AecEngine
 
@@ -125,6 +126,7 @@ except ValueError:
 SPEAKER_ENABLED = os.environ.get("SPEAKER_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 SPEAKER_GATE_OVERLAP = os.environ.get("SPEAKER_GATE_OVERLAP", "0").strip().lower() in ("1", "true", "yes", "on")
 SPEAKER_OVERLAP_MIN = float(os.environ.get("SPEAKER_OVERLAP_MIN", "0.15") or "0.15")
+SPEAKER_TSE_ENABLED = os.environ.get("SPEAKER_TSE_ENABLED", "0").strip().lower() in ("1", "true", "yes", "on")
 FOLLOWUP_LISTEN_SEC = _env_float("FOLLOWUP_LISTEN_SEC", 12.0)
 # Barge-in (xiaozhi-style interruption): keep VAD listening during TTS
 # replies; sustained speech aborts playback and starts a new turn.
@@ -580,33 +582,48 @@ def run():
                         continue
                     lang = turn_lang
                     print(f"[TURN] Transcript ready: {text!r} lang={lang}")
-                    # ── Speaker overlap / target gate (opt-in, GPU) ──
-                    if SPEAKER_ENABLED and turn_audio_parts:
+                    # ── Speaker overlap / TSE / gate (opt-in, GPU) ──
+                    if (SPEAKER_ENABLED or SPEAKER_TSE_ENABLED) and turn_audio_parts:
                         try:
-                            analyzer = get_analyzer()
+                            wav16 = _to_f32_16k(_concat_int16(turn_audio_parts), DEVICE_SAMPLE_RATE)
+                            res = None
+                            analyzer = get_analyzer() if SPEAKER_ENABLED else None
                             if analyzer is not None:
-                                wav16 = _to_f32_16k(_concat_int16(turn_audio_parts), DEVICE_SAMPLE_RATE)
                                 res = analyzer.analyze(wav16, 16000)
                                 print(
                                     f"[SPEAKER] turns={len(res['turns'])} "
-                                    f"overlap={res['overlap_ratio']:.2f} "
-                                    f"dominant={res['dominant']}"
+                                    f"overlap={res['overlap_ratio']:.2f} dominant={res['dominant']}"
                                 )
-                                if SPEAKER_GATE_OVERLAP and res["overlap_ratio"] >= SPEAKER_OVERLAP_MIN:
-                                    msg = clarify_message(lang or "en")
-                                    print(f"[SPEAKER] Overlap gate -> {msg}")
-                                    tts.speech(
-                                        msg,
-                                        language=lang,
-                                        output_queue=output_queue,
-                                        chunk_size=CHUNK,
-                                        device_sample_rate=DEVICE_SAMPLE_RATE,
-                                    )
-                                    ignore_audio_until = time.time() + LISTENING_GRACE_SEC
-                                    followup_until = time.time() + FOLLOWUP_LISTEN_SEC
-                                    turn_audio_parts = []
-                                    turn_lang = None
-                                    continue
+                            overlap = res["overlap_ratio"] if res else 0.0
+                            # Target Speaker Extraction on overlap (separation + select).
+                            if SPEAKER_TSE_ENABLED and (res is None or overlap >= SPEAKER_OVERLAP_MIN):
+                                ext = get_extractor()
+                                if ext is not None:
+                                    target = ext.extract_target(wav16, get_analyzer())
+                                    ti16 = np.clip(target * 32768, -32768, 32767).astype(np.int16)
+                                    out2 = stt.transcribe(ti16)
+                                    nt = out2.get("text", "").strip()
+                                    if nt:
+                                        print(f"[TSE] target transcript: {nt!r} lang={out2.get('language')}")
+                                        text = nt
+                                        lang = out2.get("language") or lang
+                            # Optional gate: ask to repeat when overlap and no TSE.
+                            if (SPEAKER_GATE_OVERLAP and not SPEAKER_TSE_ENABLED
+                                    and res and overlap >= SPEAKER_OVERLAP_MIN):
+                                msg = clarify_message(lang or "en")
+                                print(f"[SPEAKER] Overlap gate -> {msg}")
+                                tts.speech(
+                                    msg,
+                                    language=lang,
+                                    output_queue=output_queue,
+                                    chunk_size=CHUNK,
+                                    device_sample_rate=DEVICE_SAMPLE_RATE,
+                                )
+                                ignore_audio_until = time.time() + LISTENING_GRACE_SEC
+                                followup_until = time.time() + FOLLOWUP_LISTEN_SEC
+                                turn_audio_parts = []
+                                turn_lang = None
+                                continue
                         except Exception as e:
                             print(f"[SPEAKER][error] {type(e).__name__}: {e}", flush=True)
                     turn_audio_parts = []
