@@ -641,8 +641,12 @@ def run():
                     if part:
                         turn_texts.append(part)
                     seg_lang = out.get("language")
-                    if not seg_lang or str(seg_lang).strip().lower() in ("", "auto", "none"):
-                        seg_lang = detect_lang(part) if part else None
+                    if not part:
+                        # Empty (hallucination-dropped) segments must not set the
+                        # turn language: Whisper reports junk codes like "nn" on noise.
+                        seg_lang = None
+                    elif not seg_lang or str(seg_lang).strip().lower() in ("", "auto", "none"):
+                        seg_lang = detect_lang(part)
                     if seg_lang:
                         turn_lang = seg_lang
                     print(

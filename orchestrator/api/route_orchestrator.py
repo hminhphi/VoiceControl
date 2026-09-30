@@ -104,6 +104,13 @@ async def _send_to_session_and_frontend(session_id: str, message: dict):
         await ws_manager.send("frontend", {**message, "session_id": session_id})
 
 
+def _store_assistant_reply(session_id: str, text: str) -> None:
+    """Keep the assistant turn in context so follow-ups stay coherent."""
+    text = (text or "").strip()
+    if text:
+        context_store.add(session_id, "llm_orchestrator", "assistant", text)
+
+
 def _format_score(value) -> str:
     if value is None:
         return "n/a"
@@ -469,6 +476,7 @@ async def stream_llm(session_id, messages, user_message=None, agent_responses=No
                     "message": fallback_msg,
                 },
             )
+            return fallback_msg
         else:
             await _send_to_session_and_frontend(
                 session_id,
@@ -477,6 +485,7 @@ async def stream_llm(session_id, messages, user_message=None, agent_responses=No
                     "message": full_text,
                 },
             )
+            return full_text
 
     except Exception as e:
         logger.warning("LLM streaming unavailable (%s), falling back to natural response", e)
@@ -511,6 +520,7 @@ async def stream_llm(session_id, messages, user_message=None, agent_responses=No
                 "message": fallback_msg,
             },
         )
+        return fallback_msg
 
 
 LOW_SCORE_FAIL_FILTER = 0.35
@@ -901,6 +911,17 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
 
         user_lang = _normalize_lang_hint(language) or _detect_lang(user_message)
 
+        # Conversation history for this session (user + assistant turns, capped by
+        # PerAgentContext). The current user message was already added at ingress
+        # (post_message); append it only if it is missing (defensive).
+        history = [
+            m
+            for m in context_store.get_recent(session_id, "llm_orchestrator")
+            if isinstance(m.get("content"), str)
+        ]
+        if not history or history[-1].get("content") != user_message:
+            history = [*history, {"role": "user", "content": user_message}]
+
         messages = [
             {
                 "role": "system",
@@ -910,7 +931,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                     f"Context:\nCurrent local time and date: {now_str}"
                 ),
             },
-            {"role": "user", "content": user_message},
+            *history,
         ]
 
         text_tokens = []
@@ -934,9 +955,11 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 logger.info("Direct stream empty, using natural fallback: %s", fallback_msg)
                 await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_msg})
+                _store_assistant_reply(session_id, fallback_msg)
             else:
                 logger.info("Direct stream completed for session_id=%s: %s", session_id, full_text)
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": full_text})
+                _store_assistant_reply(session_id, full_text)
             return
 
         # ---------------- Case 2: Tool call emitted ----------------
@@ -1005,6 +1028,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
             logger.info("Fast Return car_control for session_id=%s: %s", session_id, confirmation)
             await _send_to_session_and_frontend(session_id, {"type": "token", "content": confirmation})
             await _send_to_session_and_frontend(session_id, {"type": "done", "message": confirmation})
+            _store_assistant_reply(session_id, confirmation)
             return
 
         # ====== Tool: search_car_manual ======
@@ -1040,6 +1064,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 logger.info("Direct TTS bypass for session_id=%s: %s", session_id, direct_tts_answer)
                 await _send_to_session_and_frontend(session_id, {"type": "token", "content": direct_tts_answer})
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": direct_tts_answer})
+                _store_assistant_reply(session_id, direct_tts_answer)
                 return
 
             # Extract facts from docs or message
@@ -1061,6 +1086,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 logger.info("No manual facts found, sending localized message: %s", no_info)
                 await _send_to_session_and_frontend(session_id, {"type": "token", "content": no_info})
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": no_info})
+                _store_assistant_reply(session_id, no_info)
                 return
 
             # Synthesize answer using streaming LLM Turn 2
@@ -1074,6 +1100,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                     "role": "system",
                     "content": f"{DORA_SYNTHESIS_SYSTEM_PROMPT}\n{lang_instruction}",
                 },
+                *history[:-1][-6:],
                 {
                     "role": "user",
                     "content": (
@@ -1097,20 +1124,24 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 fallback_fact = docs[0].get("a") if docs else rag_text
                 await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_fact})
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_fact})
+                _store_assistant_reply(session_id, fallback_fact)
             else:
                 logger.info("Turn 2 synthesis completed for session_id=%s: %s", session_id, full_turn2_text)
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": full_turn2_text})
+                _store_assistant_reply(session_id, full_turn2_text)
             return
 
         else:
             logger.warning("Unknown tool call %r, falling back to direct completion", fn_name)
-            await stream_llm(session_id, messages, user_message=user_message, agent_responses=[])
+            reply = await stream_llm(session_id, messages, user_message=user_message, agent_responses=[])
+            _store_assistant_reply(session_id, reply)
 
     except Exception as e:
         logger.exception("Error in process_request_tool_calling session_id=%s: %s", session_id, e)
         fallback_msg = _generate_natural_fallback(user_message, [])
         await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
         await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_msg})
+        _store_assistant_reply(session_id, fallback_msg)
 
 
 @router.post("/message", response_model=MessageAccepted)

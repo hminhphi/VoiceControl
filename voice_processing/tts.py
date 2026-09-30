@@ -4,6 +4,8 @@ import time
 import numpy as np
 from kokoro_onnx import Kokoro
 
+from lang import detect_lang
+
 try:
     import sounddevice as sd
     HAS_SOUNDDEVICE = True
@@ -223,7 +225,14 @@ class TTSProcessor:
             return
         base = _base_lang(language)
         if base not in SUPPORTED_LANGS:
-            print(f"[TTS] language {language!r} not supported; falling back to English")
+            # Last-resort: recover the language from the reply text itself
+            # (e.g. an STT backend reported an unsupported code like "nn").
+            detected = detect_lang(text)
+            if detected:
+                print(f"[TTS] language {language!r} not supported; using detected {detected!r}")
+                language = detected
+            else:
+                print(f"[TTS] language {language!r} not supported; falling back to English")
         t0 = time.time()
         try:
             audio, sr = self._synthesize(text.strip(), language)

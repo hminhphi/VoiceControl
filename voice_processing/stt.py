@@ -8,6 +8,7 @@ import numpy as np
 from urllib.parse import urlencode
 from pydub import AudioSegment
 from resampler import Resampler
+from lang import detect_lang
 
 STT_SAMPLE_RATE = 16000
 NEMOTRON_MODEL_ID = "nvidia/nemotron-speech-streaming-en-0.6b"
@@ -32,6 +33,30 @@ _ELEVENLABS_ERROR_EVENTS = {
     "scribe_queue_overflow_error",
     "scribe_resource_exhausted_error",
 }
+
+
+# Languages the rest of the stack supports (TTS voices + LLM directives).
+# Anything else (e.g. Whisper's "nn" on noise) must never leak downstream.
+SUPPORTED_LANGS = {"en", "vi", "ja", "ko", "zh"}
+
+
+def _sanitize_lang(code) -> str | None:
+    """Normalize a backend-reported language to a supported short code."""
+    if not code:
+        return None
+    base = str(code).strip().lower().replace("_", "-").split("-")[0]
+    return base if base in SUPPORTED_LANGS else None
+
+
+def _resolve_lang(text: str, reported) -> str | None:
+    """Language for a transcription: None when empty, otherwise supported code.
+
+    Falls back to lightweight script detection when the backend reports an
+    unsupported/unknown code (e.g. Whisper detecting Norwegian on noise).
+    """
+    if not text:
+        return None
+    return _sanitize_lang(reported) or detect_lang(text)
 
 
 def _pad_audio(audio_data, sample_width=2, channels=1):
@@ -217,8 +242,8 @@ class WhisperTrtBackend:
         text = result.get("text", "")
         m = re.search(r"<\|([a-z]{2})\|>", text)
         generated_lang = m.group(1) if m else None
-        detected_lang = self.language or generated_lang
         clean = re.sub(r"<\|[^|]+\|>", "", text).strip()
+        detected_lang = _resolve_lang(clean, self.language or generated_lang)
         rms, peak = _audio_metrics(samples)
         print(
             f"[STT][debug] forced_lang={self.language or 'auto'} "
@@ -415,7 +440,7 @@ class OpenAITranscriptionBackend:
         print(f"[STT][debug] text={text!r}")
         return {
             "text": text,
-            "language": self.language,
+            "language": _resolve_lang(text, self.language),
             "raw_text": text,
             "forced_language": self.language,
             "generated_language": self.language,
@@ -541,6 +566,7 @@ class ElevenLabsRealtimeTranscriptionBackend:
 
         if not text and latest_partial:
             text = latest_partial
+        detected_lang = _resolve_lang(text, detected_lang)
         print(
             f"[STT][debug] backend=elevenlabs model={self.model_name} "
             f"samples={len(samples)} rms={rms:.5f} peak={peak:.5f}"
@@ -643,7 +669,7 @@ class SherpaOnnxBackend:
             print(f"[STT][debug] text={text.encode('utf-8', errors='replace')!r}")
         return {
             "text": text,
-            "language": self.language,
+            "language": _sanitize_lang(self.language) if text else None,
             "raw_text": text,
             "forced_language": self.language if self.language != "auto" else None,
             "generated_language": self.language,
@@ -724,7 +750,7 @@ class SherpaWhisperBackend:
         self._model.decode_stream(s)
         res = s.result
         text = _strip_hallucination(getattr(res, "text", "") or "")
-        lang = getattr(res, "lang", None) or None
+        lang = _resolve_lang(text, getattr(res, "lang", None))
 
         print(
             f"[STT][debug] backend=sherpa_whisper samples={len(samples)} "
@@ -833,12 +859,13 @@ class FasterWhisperBackend:
             if part:
                 texts.append(part)
         text = " ".join(texts).strip()
-        lang = getattr(info, "language", None)
+        raw_lang = getattr(info, "language", None)
+        lang = _resolve_lang(text, raw_lang)
         prob = getattr(info, "language_probability", None)
 
         print(
             f"[STT][debug] backend=faster_whisper samples={len(samples)} "
-            f"rms={rms:.5f} peak={peak:.5f} lang={lang} prob={prob} "
+            f"rms={rms:.5f} peak={peak:.5f} lang={lang} raw={raw_lang} prob={prob} "
             f"kept={len(texts)}"
         )
         try:
