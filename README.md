@@ -221,7 +221,7 @@ scripts/pack_jetson.sh                 # Windows: .\scripts\pack_jetson.ps1
 # -> dist/orchestrator-on-edge-jetson-<YYYYMMDD>.zip
 ```
 
-The bundle contains source, config and models for arm64 and ships `.env.example` only. See [`DEPLOY.md`](DEPLOY.md).
+The bundle contains source, config and models for arm64, ships the ready-to-run `.env` (plus `.env.example` as a template). See [`DEPLOY.md`](DEPLOY.md).
 
 ## Testing
 

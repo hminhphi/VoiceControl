@@ -7,12 +7,14 @@ The zip contains a single top-level folder `orchestrator-on-edge/`, so on the
 Jetson you can simply `unzip` and `cd orchestrator-on-edge`.
 
 Includes: arm64 config + code + models (GGUF, sherpa, Kokoro, embedding cache,
-Jetson aarch64 wheels, arm64 native libs). Ships `.env.example` only.
+Jetson aarch64 wheels, arm64 native libs). Ships the real `.env` (Jetson
+configuration, so the bundle runs out of the box) plus `.env.example` as a
+reference template.
 
 Excludes: everything x86 (docker-compose.x86.yml, Dockerfile.x86*, *.x86),
-dev-only tooling (stubs, run_all_pc.ps1, car_control_ui, frontend), secrets
-(.env, .env.x86), venvs, caches-byproducts, build outputs, __pycache__, and
-non-arm64 native libs.
+dev-only tooling (stubs, run_all_pc.ps1, car_control_ui, frontend),
+`.env.x86`, nested `.env` files (e.g. voice_processing/kokoro_tts/.env),
+venvs, caches-byproducts, build outputs, __pycache__, and non-arm64 native libs.
 
 Usage:
     python scripts/pack_jetson.py [--out dist] [--name orchestrator-on-edge]
@@ -32,7 +34,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 TOP_FILES = [
-    ".dockerignore", ".env.example", ".gitignore",
+    ".dockerignore", ".env", ".env.example", ".gitignore",
     "LICENSE", "Makefile", "README.md",
     "DEPLOY.md", "DEV_STEP.md", "SYSTEMD_SETUP.md",
     "docker-compose.yml", "Dockerfile.l4t-base",
@@ -74,7 +76,7 @@ EXCLUDE_FILE_GLOBS = [
 
 # x86 / dev-only files skipped anywhere.
 EXCLUDE_FILE_NAMES = {
-    ".env", ".env.x86", ".env.x86.example",
+    ".env.x86", ".env.x86.example",
     "docker-compose.x86.yml", "Dockerfile.x86-base",
     "Dockerfile.x86", "pyproject.x86.toml", "run_all_pc.ps1",
 }
@@ -104,6 +106,10 @@ def _skip_dir(rel: str) -> bool:
 def _skip_file(rel: str) -> bool:
     name = Path(rel).name
     if name in EXCLUDE_FILE_NAMES:
+        return True
+    # Ship only the root `.env` (Jetson config); nested .env files (e.g.
+    # voice_processing/kokoro_tts/.env) may hold unrelated secrets.
+    if name == ".env" and rel != ".env":
         return True
     if name.endswith(".x86"):
         return True
@@ -154,16 +160,19 @@ def _iter_files(llm_model_file: str | None = None) -> list[tuple[Path, str]]:
 
 
 def _read_llm_model_file() -> str | None:
-    """Resolve the model filename to ship: env override, else .env.example."""
+    """Resolve the model filename to ship: env override, else `.env`, else `.env.example`."""
     env_val = os.environ.get("LLM_MODEL_FILE")
     if env_val:
         return env_val.strip()
-    env_file = ROOT / ".env.example"
-    if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if line.startswith("LLM_MODEL_FILE="):
-                return line.split("=", 1)[1].strip() or None
+    for name in (".env", ".env.example"):
+        env_file = ROOT / name
+        if env_file.is_file():
+            for line in env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = line.strip()
+                if line.startswith("LLM_MODEL_FILE="):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        return val
     return None
 
 
@@ -180,7 +189,7 @@ def main() -> int:
     parser.add_argument("--root-prefix", default="orchestrator-on-edge",
                         help="top-level folder inside the zip")
     parser.add_argument("--llm-model-file", default=None,
-                        help="GGUF filename to ship (default: LLM_MODEL_FILE from .env.example)")
+                        help="GGUF filename to ship (default: LLM_MODEL_FILE from .env)")
     args = parser.parse_args()
 
     out_dir = (ROOT / args.out).resolve()

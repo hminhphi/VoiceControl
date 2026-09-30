@@ -372,6 +372,15 @@ if (-not $SkipInstall) {
         "onnxruntime",
         "pydub",
         "kokoro-onnx",
+        # Japanese TTS G2P for Kokoro's ja voice; without these it falls back to
+        # espeak with the wrong phoneme set. pyopenjtalk-plus ships prebuilt
+        # wheels (the plain pyopenjtalk needs a CMake build on Windows).
+        "misaki",
+        "fugashi",
+        "jaconv",
+        "mojimoji",
+        "pyopenjtalk-plus",
+        "unidic-lite",
         "openwakeword",
         "sherpa-onnx",
         "webrtcvad-wheels"

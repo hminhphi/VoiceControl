@@ -89,7 +89,7 @@ rectangle "fetch_assets\ntải model + wheels" as A
 rectangle "pack_jetson\nđóng gói arm64 (loại x86)" as B
 rectangle "zip\norchestrator-on-edge-jetson-<date>.zip" as C
 rectangle "copy → Jetson\nscp / USB" as D
-rectangle "unzip + .env\ncp .env.example .env" as E
+rectangle "unzip (kèm .env)\nkiểm tra/sửa .env" as E
 rectangle "build image\nl4t-base → services" as F
 rectangle "run_all.sh\naudio · llama-server · compose" as G
 A --> B

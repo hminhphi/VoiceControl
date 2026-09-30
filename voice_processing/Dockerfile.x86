@@ -68,8 +68,21 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install \
         "espeakng-loader>=0.2.4" \
         "phonemizer-fork>=3.3.2" \
-        "misaki[ja]" \
         kokoro-onnx
+
+# Japanese G2P for Kokoro's ja voice (misaki JAG2P -> fugashi/MeCab).
+# Explicit package set instead of `misaki[ja]`: that extra pulls `unidic`,
+# whose dictionary is NOT auto-downloaded, so fugashi fails and Kokoro falls
+# back to espeak (wrong ja phonemes). unidic-lite bundles the dictionary and
+# pyopenjtalk-plus ships prebuilt wheels.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "misaki" \
+        "fugashi" \
+        "jaconv" \
+        "mojimoji" \
+        "pyopenjtalk-plus" \
+        "unidic-lite"
 
 # ── 5b. Speaker overlap / diarization (opt-in, GPU via torch CUDA) ─
 # pyannote.audio runs on the CUDA torch already present in x86-base.

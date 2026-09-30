@@ -36,19 +36,25 @@ scp orchestrator-on-edge-jetson-<YYYYMMDD>.zip <user>@<jetson_ip>:~/
 # trên Jetson
 unzip orchestrator-on-edge-jetson-<YYYYMMDD>.zip -d ~/
 cd ~/orchestrator-on-edge
-ls -la .env.example run_all.sh docker-compose.yml
+ls -la .env .env.example run_all.sh docker-compose.yml
 ```
 
-## 3. Tạo `.env`
+## 3. Kiểm tra `.env`
 
-Bundle **không** kèm `.env` thật (vì chứa secret). Tạo từ template rồi điền:
+Bundle **đã kèm sẵn `.env`** (cấu hình Jetson, giống x86: `STT_BACKEND=whisper`,
+`WHISPER_MODEL=large-v3`). Chỉ cần sửa các giá trị riêng của thiết bị:
 
 ```bash
-cp .env.example .env
 nano .env
 ```
 
-Các giá trị **bắt buộc** phải điền:
+Nếu muốn tạo lại từ template (mất các giá trị đã kèm):
+
+```bash
+cp .env.example .env
+```
+
+Các giá trị **bắt buộc** kiểm tra/điền (nếu chưa có sẵn trong `.env`):
 
 | Biến | Ghi chú |
 |------|---------|
@@ -151,9 +157,11 @@ Chi tiết (đổi user/UID, audio mode, Anker PowerConf): xem [`SYSTEMD_SETUP.m
 
 ## Nội dung bundle
 
-**Có sẵn:** code arm64 (`orchestrator/`, `agents/`, `voice_processing/`), `docker-compose.yml`, `Dockerfile.l4t-base`, `Makefile`, `run_all.sh`, `self_heal.sh`, `setup_blue*.sh`, `*.service`, docs, `.env.example`, models (GGUF, sherpa ASR/KWS, Kokoro, silero, wake words), cache embedding (`cache/orchestrator`, `cache/car_manual`), wheels aarch64, native libs `libs/*/linux/arm64`.
+**Có sẵn:** code arm64 (`orchestrator/`, `agents/`, `voice_processing/`), `docker-compose.yml`, `Dockerfile.l4t-base`, `Makefile`, `run_all.sh`, `self_heal.sh`, `setup_blue*.sh`, `*.service`, docs, **`.env` (cấu hình Jetson, chạy được ngay)**, `.env.example`, models (GGUF, sherpa ASR/KWS, Kokoro, silero, wake words), cache embedding (`cache/orchestrator`, `cache/car_manual`), wheels aarch64, native libs `libs/*/linux/arm64`.
 
-**Không có (cố ý loại):** mọi file x86 (`docker-compose.x86.yml`, `Dockerfile.x86*`, `*.x86`), dev tooling (`stubs/`, `run_all_pc.ps1`, `car_control_ui/`, `frontend/`), secret (`.env`, `.env.x86`), venv, build outputs, `__pycache__`.
+**Không có (cố ý loại):** mọi file x86 (`docker-compose.x86.yml`, `Dockerfile.x86*`, `*.x86`), dev tooling (`stubs/`, `run_all_pc.ps1`, `car_control_ui/`, `frontend/`), `.env.x86`, các `.env` lồng nhau (vd `voice_processing/kokoro_tts/.env`), venv, build outputs, `__pycache__`.
+
+> `.env` chỉ nằm trong bundle, **không** lên git (git chỉ có `.env.example`).
 
 ## Tạo bundle từ máy dev
 

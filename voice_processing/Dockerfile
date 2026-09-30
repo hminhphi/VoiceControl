@@ -63,6 +63,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         "espeakng-loader>=0.2.4" \
         "phonemizer-fork>=3.3.2"
 
+# Japanese G2P for Kokoro's ja voice (misaki JAG2P -> fugashi/MeCab).
+# pyopenjtalk-plus ships aarch64 wheels; unidic-lite bundles the dictionary.
+# (The plain `misaki[ja]` extra pulls `unidic`, whose dict is NOT auto-
+# downloaded, so fugashi fails and Kokoro falls back to espeak - wrong ja
+# phonemes, "weird" Japanese.)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "misaki" \
+        "fugashi" \
+        "jaconv" \
+        "mojimoji" \
+        "pyopenjtalk-plus" \
+        "unidic-lite"
+
 # ── 7. Speaker overlap / diarization (opt-in, GPU via torch CUDA) ─────
 # pyannote.audio runs on the torch CUDA already present in l4t-base.
 # Models are gated on HuggingFace: accept the model conditions and set
