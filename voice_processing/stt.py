@@ -835,10 +835,16 @@ class FasterWhisperBackend:
 
 class STTProcessor:
     def __init__(self, device_sample_rate, model_name="small", language=None):
-        default_backend = "sherpa_onnx" if os.name == "nt" else "whisper_trt"
-        backend = os.environ.get("STT_BACKEND", default_backend).strip().lower()
+        # Unified default: Whisper on GPU. `whisper` resolves to the best GPU
+        # Whisper runtime for the platform (TensorRT on Jetson, faster-whisper
+        # CUDA on x86) so PC dev and Jetson share one configuration.
+        backend = (os.environ.get("STT_BACKEND") or "whisper").strip().lower()
         backend = backend.replace("-", "_")
-        if backend in ("whisper", "whisper_trt", "trt"):
+        if backend == "whisper":
+            self.backend_name, self.backend = self._build_whisper(
+                device_sample_rate, model_name, language
+            )
+        elif backend in ("whisper_trt", "trt"):
             try:
                 self.backend_name = "whisper_trt"
                 self.backend = WhisperTrtBackend(device_sample_rate, model_name, language)
@@ -882,8 +888,36 @@ class STTProcessor:
         else:
             raise ValueError(
                 f"Unsupported STT_BACKEND={backend!r}; "
-                "expected whisper_trt, faster_whisper, sherpa_whisper, nemotron, openai, elevenlabs, or sherpa_onnx"
+                "expected whisper (GPU), whisper_trt, faster_whisper, sherpa_whisper, nemotron, openai, elevenlabs, or sherpa_onnx"
             )
+
+    @staticmethod
+    def _build_whisper(device_sample_rate, model_name, language):
+        """Resolve `STT_BACKEND=whisper` to a GPU Whisper implementation.
+
+        Preference (GPU-first, per platform):
+          1. TensorRT Whisper (Jetson `whisper_trt`)   — GPU
+          2. faster-whisper (CTranslate2 CUDA)          — GPU (x86)
+          3. faster-whisper CPU
+          4. sherpa-onnx Whisper -> SenseVoice
+        """
+        try:
+            import tensorrt  # noqa: F401
+            try:
+                return "whisper_trt", WhisperTrtBackend(device_sample_rate, model_name, language)
+            except Exception as e:
+                print(f"[STT] whisper_trt unavailable ({e}); trying faster-whisper", flush=True)
+        except Exception:
+            pass
+        try:
+            return "faster_whisper", FasterWhisperBackend(device_sample_rate, language=language)
+        except (ImportError, ModuleNotFoundError) as e:
+            print(f"[STT] faster_whisper unavailable ({e}); trying sherpa_whisper", flush=True)
+        try:
+            return "sherpa_whisper", SherpaWhisperBackend(device_sample_rate, language=language)
+        except (ImportError, ModuleNotFoundError, FileNotFoundError) as e:
+            print(f"[STT] sherpa_whisper unavailable ({e}); using sherpa_onnx", flush=True)
+        return "sherpa_onnx", SherpaOnnxBackend(device_sample_rate, language=language)
 
     def transcribe(self, audio_int16):
         return self.backend.transcribe(audio_int16)

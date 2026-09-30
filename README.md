@@ -170,7 +170,7 @@ Start from the committed templates (`.env.example`, `.env.x86.example`). Key var
 | `OPENAI_API_KEY` | *(empty)* | Use OpenAI instead of the local LLM |
 | `GRAPHQL_API_KEY` / `GRAPHQL_HOST` | *(empty)* | Vehicle backend credentials |
 | `CAR_MANUAL_BRAND` | `mmc` | Manual dataset (`mmc`, `toyota`, `mercedes`) |
-| `STT_BACKEND` | `sherpa_onnx` | `whisper_trt` · `faster_whisper` (vi/en/ja, GPU) · `sherpa_whisper` · `nemotron` · `openai` · `elevenlabs` · `sherpa_onnx` |
+| `STT_BACKEND` | `whisper` | `whisper` = Whisper GPU (x86: faster-whisper/CUDA · Jetson: TensorRT) · `faster_whisper` · `whisper_trt` · `sherpa_whisper` · `sherpa_onnx` · `nemotron` · `openai` · `elevenlabs` |
 | `STT_LANGUAGE` | `auto` | STT language; `auto` detects English/Japanese (and zh/ko/yue) per utterance |
 | `TTS_LANGUAGE` | *(empty)* | Force the spoken language; empty = speak the language detected per turn |
 | `WAKE_WORD_BACKEND` | `openwakeword` | `openwakeword` · `sherpa_onnx` |

@@ -39,9 +39,9 @@ public defaults need it).
   `LLM_MODEL_FILE` in `.env` accordingly.
 - `fetch_assets asr-fw` downloads the **faster-whisper** (CTranslate2) model in
   `FASTER_WHISPER_SIZE` (default `large-v3`; also `medium`/`small`) to
-  `.../models/faster_whisper/<size>`. This is the recommended ASR for accurate
-  vi/en/ja on GPU (`STT_BACKEND=faster_whisper`). Set `FASTER_WHISPER_MODEL` to
-  that directory path.
+  `.../models/faster_whisper/<size>`. This is the x86 GPU ASR, selected by the
+  unified `STT_BACKEND=whisper` (Jetson uses TensorRT `whisper_trt` instead).
+  Set `FASTER_WHISPER_MODEL` to that directory path.
 - `fetch_assets asr-whisper` downloads the size in `STT_WHISPER_MODEL`
   (default `small`; also `tiny`/`base`/`medium`). Whisper is multilingual with
   automatic language detection but **slower** than SenseVoice — measured on CPU

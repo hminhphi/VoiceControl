@@ -238,7 +238,7 @@ services:
       - TSE_MODEL=${TSE_MODEL:-MossFormer2_SS_16K}
       - TSE_REF_SEC=${TSE_REF_SEC:-1.5}
       # STT backend selection
-      - STT_BACKEND=${STT_BACKEND:-whisper_trt}
+      - STT_BACKEND=${STT_BACKEND:-whisper}
       - STT_MODEL=${STT_MODEL:-small.en}
       - STT_LANGUAGE=${STT_LANGUAGE:-}
       # sherpa-onnx STT (when STT_BACKEND=sherpa_onnx)

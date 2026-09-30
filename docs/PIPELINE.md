@@ -42,7 +42,7 @@ J --> K
 | 3 · VAD | Biết lúc nào có tiếng nói | `VAD_THRESHOLD_*`, `VAD_DETECT_THRESHOLD` |
 | 4 · Wake word | Đánh thức / follow-up | `WAKE_WORD_*`, `FOLLOWUP_LISTEN_SEC` |
 | 5 · Cắt lượt | Chốt segment & kết thúc câu; bỏ đoạn yếu | `SEGMENT_SILENCE`, `TURN_END_SILENCE`, `STT_MIN_RMS` |
-| 6 · STT | Chuyển giọng → chữ, vi/en/ja, tự nhận ngôn ngữ | `STT_BACKEND`, `FASTER_WHISPER_*` |
+| 6 · STT | Chuyển giọng → chữ, vi/en/ja, tự nhận ngôn ngữ | `STT_BACKEND=whisper` (x86: `FASTER_WHISPER_*`) |
 | 7 · Lọc nhiễu | Bỏ câu bịa khi gặp nhiễu/im lặng | `STT_DROP_SHORT_HALLUCINATIONS`, `FW_*` |
 | 8 · Speaker (opt-in) | Phát hiện chồng tiếng & tách người đang nói | `SPEAKER_ENABLED`, `SPEAKER_TSE_ENABLED` |
 | 9 · LLM | Chọn agent/tool, trả lời đúng ngôn ngữ | `LOCAL_LLM_URL`, `language` |

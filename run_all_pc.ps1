@@ -137,13 +137,15 @@ function Start-VoiceHost {
         $lines = @()
         $lines += "`$host.UI.RawUI.WindowTitle = '[voice_processing - Real Mic]'"
         $lines += "`$env:ORCHESTRATOR_URL = 'http://localhost:$PORT_ORCH'"
-        $lines += "`$env:STT_BACKEND = 'faster_whisper'"
+        $lines += "`$env:STT_BACKEND = 'whisper'"
         $lines += "`$env:STT_MODEL_TYPE = 'sense_voice'"
         $lines += "`$env:STT_LANGUAGE = 'auto'"
         $lines += "`$env:TTS_LANGUAGE = ''"
         $lines += "`$env:FASTER_WHISPER_MODEL = '$VOICE_DIR\agent_assets\models\faster_whisper\large-v3'"
         $lines += "`$env:FASTER_WHISPER_DEVICE = 'cuda'"
         $lines += "`$env:FASTER_WHISPER_COMPUTE = 'float16'"
+        # cuBLAS/cuDNN for CTranslate2 (faster-whisper GPU) from the nvidia wheels
+        $lines += "`$env:PATH = '$VENV_PC\Lib\site-packages\nvidia\cublas\bin;$VENV_PC\Lib\site-packages\nvidia\cudnn\bin;' + `$env:PATH"
         $lines += "`$env:STT_MODEL_DIR = '$VOICE_DIR\agent_assets\models\asr'"
         $lines += "`$env:STT_WHISPER_DIR = '$VOICE_DIR\agent_assets\models\asr_whisper'"
         $lines += "`$env:STT_WHISPER_MODEL = 'small'"

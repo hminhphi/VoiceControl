@@ -104,9 +104,10 @@ Mỗi service mở trong cửa sổ riêng (tiêu đề `[(service)]`). Docker m
 Trên x86, pipeline nhận **tiếng Anh, Nhật, Việt** và trả lời bằng TTS đúng
 ngôn ngữ đó (dựa trên kiến trúc [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)):
 
-- **STT**: **faster-whisper** (`STT_BACKEND=faster_whisper`, CTranslate2) —
-  chính xác nhất, chạy **GPU**, một model nhận cả vi/en/ja và tự phát hiện ngôn
-  ngữ. Dự phòng: `sherpa_whisper` (CPU) hoặc `sherpa_onnx` (SenseVoice).
+- **STT**: **Whisper trên GPU** — `STT_BACKEND=whisper` (**đồng nhất x86 & Jetson**):
+  x86 dùng faster-whisper/CUDA (`large-v3`), Jetson dùng TensorRT (`whisper_trt`).
+  Một model nhận cả vi/en/ja và tự phát hiện ngôn ngữ.
+  Dự phòng: `sherpa_whisper` (CPU) / `sherpa_onnx` (SenseVoice).
 - **Ngôn ngữ lượt nói**: lấy từ kết quả STT, truyền thẳng sang orchestrator
   (`language` hint) để LLM **trả lời đúng ngôn ngữ**; `voice_processing/lang.py`
   là dự phòng.
@@ -123,7 +124,7 @@ Tải model đa ngữ (một lần):
 Cấu hình liên quan trong `.env.x86`:
 
 ```dotenv
-STT_BACKEND=faster_whisper
+STT_BACKEND=whisper
 STT_LANGUAGE=auto
 FASTER_WHISPER_MODEL=/app/agent_assets/models/faster_whisper/large-v3
 FASTER_WHISPER_DEVICE=cuda
