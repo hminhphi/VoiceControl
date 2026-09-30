@@ -157,7 +157,12 @@ Chi tiết (đổi user/UID, audio mode, Anker PowerConf): xem [`SYSTEMD_SETUP.m
 
 ## Nội dung bundle
 
-**Có sẵn:** code arm64 (`orchestrator/`, `agents/`, `voice_processing/`), `docker-compose.yml`, `Dockerfile.l4t-base`, `Makefile`, `run_all.sh`, `self_heal.sh`, `setup_blue*.sh`, `*.service`, docs, **`.env` (cấu hình Jetson, chạy được ngay)**, `.env.example`, models (GGUF, sherpa ASR/KWS, Kokoro, silero, wake words), cache embedding (`cache/orchestrator`, `cache/car_manual`), wheels aarch64, native libs `libs/*/linux/arm64`.
+**Có sẵn:** code arm64 (`orchestrator/`, `agents/`, `voice_processing/`), `docker-compose.yml`, `Dockerfile.l4t-base`, `Makefile`, `run_all.sh`, `self_heal.sh`, `setup_blue*.sh`, `*.service`, docs, **`.env` (cấu hình Jetson, chạy được ngay)**, `.env.example`, models: GGUF, **Whisper `large-v3.pt` (TensorRT)** + sherpa-whisper + SenseVoice, **Kokoro + Piper vi TTS**, Silero VAD, wake words, **ClearVoice TSE**, cache embedding (`cache/orchestrator`, `cache/car_manual`), wheels aarch64, native libs `libs/*/linux/arm64`.
+
+> **Lần chạy đầu tiên trên Jetson:** `whisper_trt` build TRT engine từ
+> `large-v3.pt` (10–20 phút, có log); engine được cache vào
+> `/app/cache/whisper_trt` nên các lần sau load trực tiếp. Không cần Internet
+> (model `.pt` đã nằm trong bundle).
 
 **Không có (cố ý loại):** mọi file x86 (`docker-compose.x86.yml`, `Dockerfile.x86*`, `*.x86`), dev tooling (`stubs/`, `run_all_pc.ps1`, `car_control_ui/`, `frontend/`), `.env.x86`, các `.env` lồng nhau (vd `voice_processing/kokoro_tts/.env`), venv, build outputs, `__pycache__`.
 

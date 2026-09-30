@@ -23,7 +23,8 @@ public defaults need it).
 | Kokoro TTS `kokoro-v1.0.onnx`, `voices-v1.0.bin` | no (345 MB) | `voice_processing/kokoro_tts/` | HF `mikkoph/kokoro-onnx` (mirror) | `fetch_assets kokoro` |
 | sherpa SenseVoice ASR | no (234 MB) | `voice_processing/agent_assets/models/asr/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
 | sherpa KWS (zipformer) | no (~40 MB) | `voice_processing/agent_assets/models/kws/` | GitHub `k2-fsa/sherpa-onnx` releases | `fetch_assets sherpa` |
-| **faster-whisper** (CTranslate2) vi/en/ja, GPU | no (~3 GB, large-v3) | `voice_processing/agent_assets/models/faster_whisper/` | HF `Systran/faster-whisper-<size>` | `fetch_assets asr-fw` |
+| **faster-whisper** (CTranslate2) vi/en/ja, GPU | no (~3 GB, large-v3) | HF cache (`models--Systran--faster-whisper-<size>`) | HF `Systran/faster-whisper-<size>` | `fetch_assets asr-fw` |
+| **Whisper .pt** (nguồn build TensorRT) | no (~3.1 GB, large-v3) | `voice_processing/agent_assets/models/whisper/` | `openaipublic.azureedge.net` (sha256 pin) | `fetch_assets whisper-pt` |
 | **ClearVoice** separation/TSE (MossFormer2_SS_16K) | no (~670 MB) | `voice_processing/checkpoints/` | HF `alibabasglab/MossFormer2_SS_16K` | `fetch_assets tse` |
 | **pyannote** diarization/embedding | no | HF cache | HF `pyannote/*` (**gated**, cần `HF_TOKEN`) | `fetch_assets speaker` |
 | Whisper multilingual ASR (vi/en/ja) | no (~360 MB) | `voice_processing/agent_assets/models/asr_whisper/` | HF `csukuangfj/sherpa-onnx-whisper-small` | `fetch_assets asr-whisper` |
@@ -43,6 +44,11 @@ public defaults need it).
   `STT_BACKEND=whisper` works offline. It is the x86 GPU runtime; Jetson uses
   TensorRT (`whisper_trt`) with the same model name. To use a local directory
   instead, set `FASTER_WHISPER_MODEL` to an existing path.
+- `fetch_assets whisper-pt` downloads the OpenAI **Whisper `.pt`** (sha256-pinned
+  from the `openaipublic` CDN) used by the Jetson TensorRT runtime. On first run
+  `whisper_trt` converts it to a TRT engine (10–20 min) and caches the engine in
+  `/app/cache/whisper_trt`; later runs load the engine directly. `WHISPER_MODEL`
+  selects the checkpoint (default `large-v3`).
 - `fetch_assets asr-whisper` downloads the size in `STT_WHISPER_MODEL`
   (default `small`; also `tiny`/`base`/`medium`). Whisper is multilingual with
   automatic language detection but **slower** than SenseVoice — measured on CPU

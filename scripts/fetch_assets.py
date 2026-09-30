@@ -18,6 +18,7 @@ Subcommands:
     sherpa       SenseVoice ASR + KWS (delegates to voice_processing/download_models.py)
     asr-whisper  sherpa-onnx Whisper (vi/en/ja) -> .../models/asr_whisper/
     asr-fw       faster-whisper CTranslate2     -> HF cache (WHISPER_MODEL)
+    whisper-pt   openai Whisper .pt (TensorRT)  -> .../models/whisper/
     tts-vi       Piper vi_VN (sherpa-onnx)      -> .../models/tts/
     tse          ClearVoice separation/TSE      -> voice_processing/checkpoints/
     speaker      pyannote diarization/embedding -> HF cache (gated, needs HF_TOKEN)
@@ -82,6 +83,15 @@ VOICE_CACHE = ROOT / "cache" / "voice_processing"
 # so prefetched models are shared between host and Docker.
 os.environ.setdefault("HF_HOME", str(VOICE_CACHE))
 HF_CACHE = Path(os.environ["HF_HOME"]) / "hub"
+
+# OpenAI Whisper .pt checkpoints — the source model for the Jetson TensorRT
+# build (whisper_trt converts it once on first run and caches the engine).
+WHISPER_PT_DIR = ROOT / "voice_processing" / "agent_assets" / "models" / "whisper"
+WHISPER_PT_SHA256 = {
+    # sha256 from the openaipublic CDN path; re-verified after download.
+    "large-v3": "e5b1a55b89c1367dacf97e3e19bfd829a01529dbfdeefa8caeb59b3f1b81dadb",
+}
+WHISPER_PT_URL = "https://openaipublic.azureedge.net/main/whisper/models/{sha}/{name}.pt"
 
 # Vietnamese TTS — sherpa-onnx Piper vi_VN (VITS).
 PIPER_VI_URL = (
@@ -171,6 +181,7 @@ EXPECTED = [
     (WHISPER_DIR / f"{WHISPER_SIZE}-encoder.int8.onnx", 50_000_000),
     (WHISPER_DIR / f"{WHISPER_SIZE}-tokens.txt", None),
     (HF_CACHE / f"models--Systran--faster-whisper-{FW_SIZE}", None),
+    (WHISPER_PT_DIR / f"{FW_SIZE}.pt", 2_000_000_000),
     (TTS_DIR / "vits-piper-vi_VN-vais1000-medium", None),
     # Target Speaker Extraction (ClearVoice separation)
     (TSE_DIR / CLEARVOICE_MODEL / "last_best_checkpoint.pt", 500_000_000),
@@ -381,6 +392,22 @@ def fetch_asr_fw() -> None:
     log(f"  -> {_rel(cached)}")
 
 
+def fetch_whisper_pt() -> None:
+    """OpenAI Whisper .pt — used by whisper_trt (TensorRT) on Jetson."""
+    name = FW_SIZE
+    sha = WHISPER_PT_SHA256.get(name)
+    if not sha:
+        raise SystemExit(
+            f"no sha256 known for Whisper .pt {name!r}; add it to "
+            "WHISPER_PT_SHA256 in scripts/fetch_assets.py"
+        )
+    download_url(
+        WHISPER_PT_URL.format(sha=sha, name=name),
+        WHISPER_PT_DIR / f"{name}.pt",
+        sha256=sha,
+    )
+
+
 def fetch_tse() -> None:
     dest = TSE_DIR / CLEARVOICE_MODEL
     log(f"ClearVoice TSE checkpoint: alibabasglab/{CLEARVOICE_MODEL}")
@@ -444,6 +471,7 @@ SUBCOMMANDS = {
     "kokoro": fetch_kokoro,
     "asr-whisper": fetch_asr_whisper,
     "asr-fw": fetch_asr_fw,
+    "whisper-pt": fetch_whisper_pt,
     "tts-vi": fetch_tts_vi,
     "tse": fetch_tse,
     "speaker": fetch_speaker,
@@ -452,7 +480,7 @@ SUBCOMMANDS = {
     "wheels": fetch_wheels,
     "verify": verify,
 }
-ORDER = ["llm", "embed", "kokoro", "asr-fw", "asr-whisper", "tts-vi", "tse", "speaker", "sherpa", "silero", "wheels"]
+ORDER = ["llm", "embed", "kokoro", "asr-fw", "whisper-pt", "asr-whisper", "tts-vi", "tse", "speaker", "sherpa", "silero", "wheels"]
 
 
 def main() -> int:

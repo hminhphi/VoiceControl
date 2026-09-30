@@ -49,13 +49,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         openwakeword==0.5.1
 
 # ── 5. STT backends ───────────────────────────────────────────
-# sherpa-onnx only (STT_BACKEND=sherpa_onnx in .env).
-# REMOVED 2026-09: openai-whisper, transformers, accelerate, safetensors,
-# librosa (served whisper_trt/nemotron backends — unused in any live path,
-# ~1.5-2GB). stt.py keeps lazy imports + auto-fallback to sherpa_onnx, so
-# re-adding later is just restoring the pip lines below.
-#   openai-whisper==20240927 + transformers>=5.13.0, accelerate,
-#   safetensors, librosa
+# STT_BACKEND=whisper → TensorRT (whisper_trt) on Jetson, same model as x86
+# (WHISPER_MODEL=large-v3, loaded from agent_assets/models/whisper/large-v3.pt).
+# sherpa-onnx (SenseVoice/Whisper) remains the CPU fallback.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install \
+        "openai-whisper==20240927" \
+        "transformers>=5.13.0" \
+        accelerate \
+        safetensors \
+        librosa
 
 # ── 6. TTS (Kokoro ONNX) ──────────────────────────────────────
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -84,15 +87,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install "pyannote.audio>=3.1.0" clearvoice
 
-# ── 8. torch2trt + whisper_trt ─────────────────────────────────
-# REMOVED 2026-09: only needed to build whisper_trt engines (unused —
-# STT_BACKEND=sherpa_onnx). Sources kept in repo (~1MB) for reference.
-
 # ── 8. Application source ─────────────────────────────────────
 # Bind-mount context strips __pycache__, cache/, output/ via .dockerignore.
 # wheels/ (303MB) is excluded: pip installs from bind-mounted wheels at
 # build time, and the runtime volume-mount shadows /app anyway.
 COPY --exclude=wheels voice_processing/ /app/
+
+# ── 8b. torch2trt + whisper_trt (TensorRT Whisper) ────────────
+# Built from the sources kept in the repo. whisper_trt loads the local
+# large-v3.pt (WHISPER_BASE_MODEL_PATH) and builds the TRT engine on first
+# run, caching it under /app/cache/whisper_trt for later runs.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install setuptools wheel \
+    && if [ -d /app/torch2trt ]; then python3 -m pip install /app/torch2trt; fi \
+    && if [ -d /app/whisper_trt ]; then python3 -m pip install /app/whisper_trt; fi
 
 # ── 9. Optional: local kokoro-onnx ────────────────────────────
 RUN --mount=type=cache,target=/root/.cache/pip \

@@ -240,7 +240,13 @@ services:
       # STT — Whisper GPU (Jetson: TensorRT), ĐỒNG NHẤT với x86
       - STT_BACKEND=${STT_BACKEND:-whisper}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
-      - STT_LANGUAGE=${STT_LANGUAGE:-}
+      # Nguồn .pt local để build TensorRT engine (fetch_assets whisper-pt)
+      - WHISPER_BASE_MODEL_PATH=${WHISPER_BASE_MODEL_PATH:-/app/agent_assets/models/whisper/large-v3.pt}
+      - STT_LANGUAGE=${STT_LANGUAGE:-auto}
+      # fallback: sherpa-onnx Whisper (models ship in the bundle)
+      - STT_WHISPER_DIR=${STT_WHISPER_DIR:-/app/agent_assets/models/asr_whisper}
+      - STT_WHISPER_MODEL=${STT_WHISPER_MODEL:-small}
+      - STT_WHISPER_INT8=${STT_WHISPER_INT8:-1}
       # sherpa-onnx STT (when STT_BACKEND=sherpa_onnx)
       - STT_MODEL_DIR=${STT_MODEL_DIR:-/app/agent_assets/models/asr}
       - STT_MODEL_TYPE=${STT_MODEL_TYPE:-sense_voice}

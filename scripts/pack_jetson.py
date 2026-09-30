@@ -6,10 +6,11 @@ Produces: dist/orchestrator-on-edge-jetson-<YYYYMMDD>.zip
 The zip contains a single top-level folder `orchestrator-on-edge/`, so on the
 Jetson you can simply `unzip` and `cd orchestrator-on-edge`.
 
-Includes: arm64 config + code + models (GGUF, sherpa, Kokoro, embedding cache,
-Jetson aarch64 wheels, arm64 native libs). Ships the real `.env` (Jetson
-configuration, so the bundle runs out of the box) plus `.env.example` as a
-reference template.
+Includes: arm64 config + code + models (GGUF, Whisper large-v3 .pt for
+TensorRT + sherpa-whisper + SenseVoice, Kokoro + Piper vi TTS, Silero VAD,
+wake words, ClearVoice TSE checkpoints, embedding cache, Jetson aarch64 wheels,
+arm64 native libs). Ships the real `.env` (Jetson configuration, so the bundle
+runs out of the box) plus `.env.example` as a reference template.
 
 Excludes: everything x86 (docker-compose.x86.yml, Dockerfile.x86*, *.x86),
 dev-only tooling (stubs, run_all_pc.ps1, car_control_ui, frontend),
@@ -58,10 +59,7 @@ EXCLUDE_DIR_NAMES = {
 # Exact relative directories to skip.
 EXCLUDE_DIR_REL = {
     "voice_processing/cache", "voice_processing/input_test", "voice_processing/output",
-    "voice_processing/agent_assets/models/asr_whisper",
     "voice_processing/agent_assets/models/faster_whisper",
-    "voice_processing/agent_assets/models/tts",
-    "voice_processing/checkpoints",
     "voice_processing/tools/audio_lab/recordings",
     "voice_processing/torch2trt/build", "voice_processing/torch2trt/dist",
     "voice_processing/whisper_trt/build", "voice_processing/whisper_trt/dist",
