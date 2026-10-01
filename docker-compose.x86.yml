@@ -178,10 +178,11 @@ services:
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
       # Vietnamese TTS (sherpa-onnx Piper)
       - PIPER_VI_DIR=${PIPER_VI_DIR:-/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium}
-      # Execution providers: cpu | cuda (GPU needs CUDA-enabled onnxruntime/sherpa)
-      - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}       # Kokoro TTS / VAD
-      - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word
-      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
+      # Execution providers: cuda = GPU nếu có, tự fallback cpu nếu không
+      # (Dockerfile.x86 đã restore onnxruntime-gpu -> CUDA EP có thật trong container)
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-cuda}       # Kokoro TTS / VAD
+      - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word (wheel PyPI = CPU)
+      - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
       - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
       - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}

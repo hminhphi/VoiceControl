@@ -90,6 +90,19 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install "pyannote.audio>=3.1.0" clearvoice
 
+# ── 5c. Restore the GPU onnxruntime module ────────────────────
+# silero-vad/openwakeword pull the CPU `onnxruntime` dist; its files overwrite
+# shared files of onnxruntime-gpu AND leave a CPU pybind state with a
+# cpython-tagged filename that Python prefers -> the image ends up CPU-only
+# (CUDA EP gone; this is why the previously built x86 voice image reports
+# CPU-only). Uninstall the CPU dist first, then force-reinstall the GPU wheel.
+# The host voice (.venvs/pc, CPU-only ORT) is unaffected - it never sets
+# ONNX_PROVIDER.
+RUN (python3 -m pip uninstall -y onnxruntime 2>/dev/null || true) \
+    && V=$(python3 -m pip show onnxruntime-gpu | sed -n 's/^Version: *//p') \
+    && python3 -m pip install --force-reinstall --no-deps "onnxruntime-gpu==$V" \
+    && python3 -c "import onnxruntime as ort; ps=ort.get_available_providers(); print('[ort]', ort.__version__, ps); assert 'CUDAExecutionProvider' in ps, 'CUDA EP missing'"
+
 # ── 6. torch2trt NOT needed on x86 ───────────────────────────
 # whisper_trt uses TRT — not available on non-Jetson.
 # We use whisper (CPU/CUDA) or sherpa-onnx instead.

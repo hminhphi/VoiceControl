@@ -223,10 +223,11 @@ services:
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
-      # Execution providers: cpu | cuda (GPU needs CUDA-enabled onnxruntime/sherpa)
-      - ONNX_PROVIDER=${ONNX_PROVIDER:-cpu}
+      # Execution providers: cuda = GPU nếu có, tự fallback cpu nếu không
+      # (image voice đã restore onnxruntime-gpu -> CUDA EP có thật)
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-cuda}
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}
-      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
+      - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
       - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
       - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}

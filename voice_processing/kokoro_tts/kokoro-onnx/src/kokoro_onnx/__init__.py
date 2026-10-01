@@ -64,9 +64,20 @@ class Kokoro:
         env_provider = os.getenv("ONNX_PROVIDER")
         if env_provider:
             providers = [env_provider]
+            # Never pin a single non-CPU provider: append CPU as fallback so a
+            # machine where the GPU EP is listed but unusable still starts
+            # (same semantics as the auto-detect path above).
+            if env_provider != "CPUExecutionProvider":
+                providers.append("CPUExecutionProvider")
 
         log.debug(f"Providers: {providers}")
-        self.sess = rt.InferenceSession(model_path, providers=providers)
+        try:
+            self.sess = rt.InferenceSession(model_path, providers=providers)
+        except Exception as e:
+            # Requested EP listed but cannot be created (no GPU, driver issue):
+            # fall back to whatever is actually available instead of crashing.
+            log.warning(f"provider {providers} failed ({e}); retrying with {available_providers}")
+            self.sess = rt.InferenceSession(model_path, providers=available_providers)
         self.voices: np.ndarray = np.load(voices_path)
 
         vocab = self._load_vocab(vocab_config)

@@ -160,6 +160,21 @@ print('[guard] numpy', v); \
 assert v.startswith('1.26'), f'numpy {v} != 1.26.x - do NOT upgrade numpy' \
 "
 
+# ── 8d. Restore the GPU onnxruntime module ────────────────────
+# silero-vad/openwakeword pull the CPU `onnxruntime` distribution; its files
+# OVERWRITE shared files of onnxruntime-gpu AND leave a CPU pybind state with
+# a cpython-tagged filename that Python prefers -> the image ends up CPU-only
+# (CUDA EP gone) even after a naive reinstall. Uninstall the CPU dist first,
+# then force-reinstall the GPU wheel: clean state, CUDA EP back (asserted).
+# x86 host voice is unaffected: its ORT build is CPU-only and it never sets
+# ONNX_PROVIDER.
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    (python3 -m pip uninstall -y onnxruntime 2>/dev/null || true) \
+    && V=$(python3 -m pip show onnxruntime-gpu | sed -n 's/^Version: *//p') \
+    && python3 -m pip install --no-index --find-links /tmp/wheels --force-reinstall --no-deps "onnxruntime-gpu==$V" \
+    && python3 -c "import onnxruntime as ort; ps=ort.get_available_providers(); print('[ort]', ort.__version__, ps); assert 'CUDAExecutionProvider' in ps, 'CUDA EP missing'"
+
 # ── 9. Optional: local kokoro-onnx (hatchling backend, offline) ─
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
