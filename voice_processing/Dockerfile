@@ -114,29 +114,42 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
         "pyannote.audio>=3.1.0" clearvoice
 
 # ── 8. Application source ─────────────────────────────────────
-# wheels/ and checkpoints/ stay OUT of the image layer (they are only
-# needed as bind-mounts during build; the runtime volume-mount shadows
-# /app anyway). COPY --exclude needs the dockerfile:1 frontend.
-COPY --exclude=wheels --exclude=checkpoints voice_processing/ /app/
+# Keep the image layer slim: wheels/ (build bind-mount), checkpoints/,
+# agent_assets/ (models incl. whisper .pt), kokoro *.onnx and I/O dirs are
+# all provided at RUNTIME by the ./voice_processing:/app volume mount, so
+# copying them would only add ~5 GB of dead weight (the original bundle
+# relied on the mount already). COPY --exclude needs the dockerfile:1
+# frontend (>=1.19; the old :1.7 pin failed the build instantly).
+COPY --exclude=wheels --exclude=checkpoints --exclude=agent_assets \
+    --exclude=output --exclude=input_test \
+    --exclude='kokoro_tts/*.onnx' --exclude='kokoro_tts/voices-*.bin' \
+    voice_processing/ /app/
 
-# ── 8b. torch2trt + whisper_trt (TensorRT Whisper) ────────────
+# ── 8b. whisper_trt + torch2trt (TensorRT Whisper) ────────────
 # Built from the sources kept in the repo. whisper_trt loads the local
 # large-v3.pt (WHISPER_BASE_MODEL_PATH) and builds the TRT engine on first
 # run, caching it under /app/cache/whisper_trt for later runs.
-# Skipped gracefully (STT falls back to sherpa-whisper) when the TensorRT
-# python module is not importable in this image.
+# whisper_trt itself has no build-time tensorrt dependency -> always install.
+# torch2trt compiles a CUDA extension and imports tensorrt at build time;
+# libnvos.so is absent in containers (device-only lib) so this part is
+# SKIPPED both when building on x86/QEMU and on the Jetson -> consistent.
+# Runtime failures of whisper_trt are caught by stt.py (_build_whisper) and
+# fall back to sherpa-whisper.
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation setuptools wheel \
+    && if [ -d /app/whisper_trt ]; then \
+        python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/whisper_trt; \
+    fi \
     && if [ -d /app/torch2trt ] && python3 -c "import tensorrt" 2>/dev/null; then \
-        python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/torch2trt /app/whisper_trt; \
-    else echo "[setup] tensorrt python not available; skip whisper_trt (sherpa fallback)"; fi
+        python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/torch2trt; \
+    else echo "[setup] tensorrt python unavailable in build container; skip torch2trt (runtime fallback: sherpa-whisper)"; fi
 
 # ── 9. Optional: local kokoro-onnx (hatchling backend, offline) ─
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
     if [ -d /app/kokoro_tts/kokoro-onnx ]; then \
-        python3 -m pip install --no-index --find-links /tmp/wheels hatchling \
+        python3 -m pip install --no-index --find-links /tmp/wheels hatchling editables \
         && python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation -e /app/kokoro_tts/kokoro-onnx; \
     fi
 
