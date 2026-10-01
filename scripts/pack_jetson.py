@@ -46,7 +46,7 @@ TOP_FILES = [
 
 TOP_DIRS = [
     "orchestrator", "agents", "shared", "test", "scripts", "docs",
-    "voice_processing", "llama-cpp", "cache/orchestrator", "cache/car_manual",
+    "voice_processing", "vendor", "llama-cpp", "cache/orchestrator", "cache/car_manual",
 ]
 
 # Directory names skipped anywhere in the tree.
@@ -59,6 +59,7 @@ EXCLUDE_DIR_NAMES = {
 # Exact relative directories to skip.
 EXCLUDE_DIR_REL = {
     "voice_processing/cache", "voice_processing/input_test", "voice_processing/output",
+    "voice_processing/wheels",          # build-only wheelhouse (USB jetson-offline/wheels)
     "voice_processing/agent_assets/models/faster_whisper",
     "voice_processing/tools/audio_lab/recordings",
     "voice_processing/torch2trt/build", "voice_processing/torch2trt/dist",

@@ -86,3 +86,6 @@ frontend/client/dist/
 # ── OS generated ────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# apt .debs cho build offline (không lên git, nhưng pack_jetson vẫn đóng zip)
+vendor/apt-debs/*.deb

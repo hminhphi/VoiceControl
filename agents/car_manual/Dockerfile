@@ -16,8 +16,10 @@ ENV PYTHONPATH=/app
 WORKDIR /app
 
 COPY agents/car_manual/requirements.txt ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install -r requirements.txt
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation \
+        -r requirements.txt
 
 COPY agents/car_manual/*.py ./
 COPY agents/car_manual/data/ ./data/

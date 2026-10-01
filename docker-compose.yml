@@ -33,7 +33,9 @@ x-l4t-base-image: &l4t-base-image
 
 services:
   orchestrator:
-    build: ./orchestrator
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
     logging: *default-logging
     ports:
       - "8000:8000"

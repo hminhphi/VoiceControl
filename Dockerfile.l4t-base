@@ -15,33 +15,49 @@ ENV PYTHONUNBUFFERED=1
 ENV LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/nvidia:/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}
 ENV PIP_NO_CACHE_DIR=1
 
-# ── 1. System packages ────────────────────────────────────────
+# ── 1. System packages (offline: vendor/apt-debs, fallback online) ──
+# If the bundled .debs exist (bundle ships them, git does not), install with
+# dpkg -> no network needed. Otherwise fall back to a normal apt-get.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-        python3-pip python3-dev python3-setuptools \
-        build-essential git wget curl \
-        libopenblas0 \
-        portaudio19-dev alsa-utils libasound2-dev \
-        libasound2-plugins libpulse0 pulseaudio-utils \
-        ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    --mount=type=bind,source=vendor/apt-debs,target=/tmp/apt-debs,readonly \
+    if ls /tmp/apt-debs/*.deb >/dev/null 2>&1; then \
+        echo "[base] offline apt: $(ls /tmp/apt-debs/*.deb | wc -l) debs"; \
+        dpkg -i /tmp/apt-debs/*.deb || true; \
+        dpkg -i /tmp/apt-debs/*.deb || true; \
+    else \
+        apt-get update && apt-get install -y --no-install-recommends \
+            python3-pip python3-dev python3-setuptools \
+            build-essential git wget curl pkg-config \
+            libopenblas0 libsndfile1 \
+            portaudio19-dev alsa-utils libasound2-dev \
+            libasound2-plugins libpulse0 pulseaudio-utils \
+            ffmpeg \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
-# ── 2. pip bootstrap ─────────────────────────────────────────
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --upgrade pip setuptools "setuptools<70" wheel \
-    && python3 -m pip install \
+# ── 2. pip bootstrap (offline wheelhouse: voice_processing/wheels) ─
+# --no-index --find-links /tmp/wheels: nothing is fetched from PyPI.
+# --no-build-isolation: use this env's setuptools (<70) so sdists with
+# classic setup.py (PyAudio, pesq, mojimoji) build without network.
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation \
+        --upgrade pip "setuptools<70" wheel \
+    && python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation \
         numpy==1.26.4 \
         scipy==1.15.3 \
         psutil==7.0.0 \
         soundfile==0.13.1 \
-        soxr>=0.3.7
+        packaging \
+        "soxr>=0.3.7"
 
 # ── 3. PyTorch stack (aarch64 custom wheels) ─────────────────
 # Wheels are bind-mounted at build time — NOT copied into the
-# image layer, so there is zero duplication.
+# image layer, so there is zero duplication. Dependencies (sympy,
+# networkx, jinja2, ...) also resolve from the offline wheelhouse.
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install \
+    python3 -m pip install --no-index --find-links /tmp/wheels \
         /tmp/wheels/torch-2.8.0-cp310-cp310-linux_aarch64.whl \
         /tmp/wheels/torchvision-0.23.0-cp310-cp310-linux_aarch64.whl \
         /tmp/wheels/torchaudio-2.8.0-cp310-cp310-linux_aarch64.whl
@@ -50,7 +66,7 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true \
-    && python3 -m pip install \
+    && python3 -m pip install --no-index --find-links /tmp/wheels \
         /tmp/wheels/onnxruntime_gpu-1.23.0-cp310-cp310-linux_aarch64.whl
 
 RUN python3 -c "import onnxruntime as ort; \
@@ -61,13 +77,15 @@ RUN python3 -c "import onnxruntime as ort; \
 # ── 5. sherpa-onnx (aarch64 wheel) ───────────────────────────
 # sherpa-onnx provides KeywordSpotter (wake word), SenseVoice ASR,
 # and streaming ASR — all offline, optimised for edge inference.
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install \
-        "sherpa-onnx>=1.12.29" \
-        "sherpa-onnx-core>=1.12.29"
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-index --find-links /tmp/wheels \
+        "sherpa-onnx==1.13.8" \
+        "sherpa-onnx-core==1.13.8"
 
 # ── 6. uv (fast Python package manager used by agent services) ─
-RUN pip install uv
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    python3 -m pip install --no-index --find-links /tmp/wheels uv
 
 # ── Smoke test ────────────────────────────────────────────────
 RUN python3 -c "import torch; print('[base] torch', torch.__version__, 'cuda:', torch.cuda.is_available())"

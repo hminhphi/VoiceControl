@@ -17,12 +17,16 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-COPY requirements.txt ./
+COPY orchestrator/requirements.txt ./
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    python3 -m pip install --upgrade pip \
-    && python3 -m pip install -r requirements.txt
+# Offline wheelhouse (voice_processing/wheels in the build context).
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-index --find-links /tmp/wheels \
+        --upgrade pip \
+    && python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation \
+        -r requirements.txt
 
-COPY *.py ./
+COPY orchestrator/*.py ./
 
 CMD ["python3", "main.py"]
