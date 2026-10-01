@@ -177,6 +177,74 @@ scripts/pack_jetson.sh              # -> dist/orchestrator-on-edge-jetson-<YYYYM
 
 Windows: `.\scripts\fetch_assets.ps1 --all` rồi `.\scripts\pack_jetson.ps1`. Script `pack_jetson` chỉ đóng gói file GGUF trỏ bởi `LLM_MODEL_FILE` (tránh kèm nhiều model).
 
+## Build image arm64 NGAY trên máy x86 (khuyến nghị — Jetson chỉ `docker load`)
+
+Máy dev amd64 build được image arm64 qua QEMU (Docker Desktop WSL2 đã hỗ trợ
+binfmt arm64). Ưu điểm: Jetson **không build, không tốn ~25 GB disk build**
+(máy Jetson chỉ còn ~39 GB), không cần mạng. Toàn bộ pipeline đã verify offline
+thật (`docker build --network none` → exit 0).
+
+**Chuẩn bị (1 lần, có mạng):**
+
+```bash
+docker pull --platform linux/arm64 nvcr.io/nvidia/l4t-jetpack:r36.4.0
+docker pull --platform linux/arm64 docker/dockerfile:1      # syntax frontend (bắt buộc offline)
+docker pull --platform linux/arm64 docker/dockerfile:1.7
+```
+
++ wheelhouse `voice_processing/wheels` (không nằm git): tạo theo
+  [`scripts/wheelhouse/README.txt`](scripts/wheelhouse/README.txt) rồi kiểm tra
+  `python scripts/verify_wheelhouse.py` → phải **0 missing**. Bộ `.deb` apt nằm
+  sẵn trong repo tại `vendor/apt-debs/` (đi kèm bundle).
+
+**Build 5 image (chạy từ repo root). KHÔNG dùng `docker compose build` trên x86**
+(vì nó build theo arch của host → ra image amd64):
+
+```bash
+docker build --platform linux/arm64 --network none --provenance=false -f Dockerfile.l4t-base           -t orchestrator-on-edge/l4t-base:r36.4.0-torch2.8 .
+docker build --platform linux/arm64 --network none --provenance=false -f voice_processing/Dockerfile    -t orchestrator-on-edge/voice_processing:latest .
+docker build --platform linux/arm64 --network none --provenance=false -f orchestrator/Dockerfile        -t orch_v1-orchestrator:latest .
+docker build --platform linux/arm64 --network none --provenance=false -f agents/car_control/Dockerfile -t orch_v1-car_control:latest .
+docker build --platform linux/arm64 --network none --provenance=false -f agents/car_manual/Dockerfile  -t orch_v1-car_manual:latest .
+
+# alias theo tên thư mục (phòng khi compose project != orch_v1)
+docker tag orch_v1-orchestrator:latest orchestrator-on-edge-orchestrator:latest
+docker tag orch_v1-car_control:latest  orchestrator-on-edge-car_control:latest
+docker tag orch_v1-car_manual:latest   orchestrator-on-edge-car_manual:latest
+```
+
+| Flag | Vì sao cần |
+|------|-----------|
+| `--platform linux/arm64` | target arm64 (QEMU emulation) |
+| `--network none` | build **offline thật** — thiếu wheel/deb sẽ fail ngay thay vì âm thầm tải |
+| `--provenance=false` | không sinh attestation manifest → `docker load` trên Docker của Jetson chắc chắn nhận |
+
+- Tag `orch_v1-*` đúng tên mà `run_all.sh -p orch_v1 up --no-build --pull never`
+  tra cứu; giữ thêm alias `orchestrator-on-edge-*` phòng compose project đổi.
+- QEMU chậm hơn native: voice ~10–20 phút, l4t-base ~5 phút (có cache),
+  orchestrator/car_* ~5–10 phút.
+- Image voice "mỏng" (~6.6 GB): models do runtime mount `./voice_processing:/app`
+  cung cấp — build không copy models vào image.
+- `torch2trt` bị skip lúc build (container thiếu `libnvos.so` — cũng xảy ra khi
+  build trên Jetson nên **giống hệt nhau**); `whisper_trt` vẫn được cài, runtime
+  thiếu tensorrt thì `stt.py` tự fallback `sherpa-whisper`.
+
+**Lưu + deploy:**
+
+```bash
+docker save -o dist/services-arm64.tar \
+  orchestrator-on-edge/l4t-base:r36.4.0-torch2.8 \
+  orchestrator-on-edge/voice_processing:latest \
+  orch_v1-orchestrator orchestrator-on-edge-orchestrator \
+  orch_v1-car_control  orchestrator-on-edge-car_control \
+  orch_v1-car_manual   orchestrator-on-edge-car_manual
+# copy vào <USB>/jetson-offline/images/ ; trên Jetson (~1 phút):
+docker load -i <USB>/jetson-offline/images/services-arm64.tar
+```
+
+Bundle trên USB đã kèm sẵn tar này (xem `README.txt` trên USB — Phần A: load →
+unzip → `./run_all.sh`, không build).
+
 ## Xử lý sự cố
 
 | Triệu chứng | Cách xử lý |

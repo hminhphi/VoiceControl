@@ -1,0 +1,7 @@
+openai-whisper==20240927
+clearvoice==0.1.2
+PyAudio==0.2.14
+pesq==0.0.4
+pystoi==0.4.1
+mojimoji==0.0.13
+unidic-lite==1.0.8
