@@ -39,7 +39,7 @@ htmlcov/
 # ── Downloaded models & large binaries (see docs/ASSETS.md) ─
 cache/
 llama-cpp/models/*.gguf
-voice_processing/wheels/*.whl
+voice_processing/wheels/
 voice_processing/kokoro_tts/*.onnx
 voice_processing/kokoro_tts/*.bin
 voice_processing/agent_assets/models/asr/
