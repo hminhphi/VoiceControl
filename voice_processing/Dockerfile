@@ -129,21 +129,36 @@ COPY --exclude=wheels --exclude=checkpoints --exclude=agent_assets \
 # Built from the sources kept in the repo. whisper_trt loads the local
 # large-v3.pt (WHISPER_BASE_MODEL_PATH) and builds the TRT engine on first
 # run, caching it under /app/cache/whisper_trt for later runs.
-# whisper_trt itself has no build-time tensorrt dependency -> always install.
-# torch2trt compiles a CUDA extension and imports tensorrt at build time;
-# libnvos.so is absent in containers (device-only lib) so this part is
-# SKIPPED both when building on x86/QEMU and on the Jetson -> consistent.
-# Runtime failures of whisper_trt are caught by stt.py (_build_whisper) and
-# fall back to sherpa-whisper.
+# tensorrt's python module cannot be imported INSIDE the build container
+# (libnvos.so is device-only), but torch2trt's setup.py only needs its
+# __version__ -> a 1-line stub on PYTHONPATH during the build is enough;
+# the CUDAExtension itself compiles/links against the real NvInfer headers
+# and libs shipped in l4t-jetpack (verified: builds + installs cleanly).
+# At RUNTIME on the Jetson the compose mounts the host tegra/nvidia dirs,
+# so the REAL tensorrt module loads and the TRT STT path works.
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation setuptools wheel \
     && if [ -d /app/whisper_trt ]; then \
         python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/whisper_trt; \
     fi \
-    && if [ -d /app/torch2trt ] && python3 -c "import tensorrt" 2>/dev/null; then \
-        python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/torch2trt; \
-    else echo "[setup] tensorrt python unavailable in build container; skip torch2trt (runtime fallback: sherpa-whisper)"; fi
+    && if [ -d /app/torch2trt ]; then \
+        mkdir -p /tmp/t2tstub \
+        && printf '__version__ = "10.0.0"\n' > /tmp/t2tstub/tensorrt.py \
+        && PYTHONPATH=/tmp/t2tstub python3 -m pip install --no-index --find-links /tmp/wheels --no-build-isolation /app/torch2trt \
+        && rm -rf /tmp/t2tstub; \
+    fi
+
+# ── 8c. Runtime guard: numpy MUST stay 1.x ────────────────────
+# clearvoice pins numpy<2 and the stack is validated on 1.26.4; a numpy 2.x
+# upgrade at install time is a known runtime breaker (seen with the old code).
+# Fail the BUILD instead of failing at runtime.
+RUN python3 -c "\
+import numpy; \
+v = numpy.__version__; \
+print('[guard] numpy', v); \
+assert v.startswith('1.26'), f'numpy {v} != 1.26.x - do NOT upgrade numpy' \
+"
 
 # ── 9. Optional: local kokoro-onnx (hatchling backend, offline) ─
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
