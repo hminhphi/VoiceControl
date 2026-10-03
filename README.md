@@ -89,7 +89,9 @@ Every agent follows the same layout: `main.py` (A2A server), `agent_card.py` (id
 
 - **Fully offline** — local LLM, ASR and TTS; no cloud dependency on the happy path.
 - **Multi-agent routing** — the LLM picks the right agent(s) per request and results are merged.
-- **Production voice pipeline** — wake word, dual-threshold VAD, AEC/AGC and barge-in.
+- **Multi-tool batch processing** — execute multiple car actions in a single LLM call (e.g., "open left and right door" → both doors open).
+- **Streaming TTS** — sentence-level streaming for English/Japanese reduces latency by 43% (time-to-first-chunk: 1.01s → 0.57s).
+- **Production voice pipeline** — wake word, dual-threshold VAD, AEC/AGC, barge-in, and wake-word detection during orchestrator wait.
 - **Hardware-abstracted** — `stubs/` let the whole stack run on a PC without vehicle hardware.
 - **Two deploy paths** — one arm64 bundle for the Jetson, one amd64 compose stack for dev.
 - **Reproducible assets** — models and aarch64 wheels are pinned by sha256 and fetched on demand.
@@ -169,7 +171,6 @@ Start from the committed templates (`.env.example`, `.env.x86.example`). Key var
 | `LLM_MODEL_FILE` | `Qwen3.5-4B-Q4_K_M.gguf` | GGUF filename under `llama-cpp/models/` |
 | `OPENAI_API_KEY` | *(empty)* | Use OpenAI instead of the local LLM |
 | `GRAPHQL_API_KEY` / `GRAPHQL_HOST` | *(empty)* | Vehicle backend credentials |
-| `CAR_MANUAL_BRAND` | `mmc` | Manual dataset (`mmc`, `toyota`, `mercedes`) |
 | `STT_BACKEND` | `whisper` | `whisper` = Whisper GPU (x86: faster-whisper/CUDA · Jetson: TensorRT) · `faster_whisper` · `whisper_trt` · `sherpa_whisper` · `sherpa_onnx` · `nemotron` · `openai` · `elevenlabs` |
 | `STT_LANGUAGE` | `auto` | STT language; `auto` detects English/Japanese (and zh/ko/yue) per utterance |
 | `TTS_LANGUAGE` | *(empty)* | Force the spoken language; empty = speak the language detected per turn |
