@@ -155,7 +155,7 @@ class AgentRegistry:
 
             return
 
-        with open(self.agent_list_path, "r", encoding="utf-8") as f:
+        with open(self.agent_list_path, "r", encoding="utf-8-sig") as f:
 
             try:
                 data = json.load(f)

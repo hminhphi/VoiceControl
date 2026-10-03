@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import os
 import time
@@ -196,6 +197,95 @@ class TTSProcessor:
             else:
                 print("[TTS] sounddevice not available, skip playback")
 
+    def _emit_chunk(self, audio_chunk, sr, output_queue, chunk_size, device_sample_rate, gen, resampler=None):
+        """Emit a single audio chunk to the output queue (for streaming)."""
+        if output_queue is not None and chunk_size is not None and device_sample_rate is not None:
+            if resampler is None and sr != device_sample_rate:
+                from resampler import Resampler
+                resampler = Resampler(sr, device_sample_rate)
+            if resampler is not None:
+                audio_chunk = resampler.resample(audio_chunk)
+            # Split into device-sized chunks
+            for i in range(0, len(audio_chunk), chunk_size):
+                chunk = audio_chunk[i:i + chunk_size]
+                if len(chunk) < chunk_size:
+                    chunk = np.pad(chunk, (0, chunk_size - len(chunk)), constant_values=0)
+                elif len(chunk) > chunk_size:
+                    chunk = chunk[:chunk_size]
+                item = chunk.reshape(chunk_size, 1).astype(np.float32)
+                output_queue.put((gen, item) if gen is not None else item)
+        else:
+            # No queue - play directly (non-streaming fallback)
+            audio_int16 = np.clip(audio_chunk * 32767, -32768, 32767).astype(np.int16)
+            if HAS_SOUNDDEVICE:
+                sd.play(audio_int16, sr)
+                sd.wait()
+            else:
+                print("[TTS] sounddevice not available, skip playback")
+        return resampler
+
+    def _split_sentences(self, text):
+        """Split text into sentences for streaming TTS."""
+        import re
+        # Split on sentence-ending punctuation followed by space
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        # Filter empty sentences
+        return [s.strip() for s in sentences if s.strip()]
+
+    async def _synthesize_stream_async(self, text, language, output_queue, chunk_size, device_sample_rate, gen):
+        """Async streaming synthesis - split into sentences for true streaming."""
+        base = _base_lang(language)
+        
+        # Vietnamese (Piper) doesn't support streaming - fall back to non-streaming
+        if base == "vi":
+            piper = self._get_piper_vi()
+            if piper is not None:
+                print(f"[TTS] Speaking (piper-vi) repr={text!r}")
+                audio, sr = piper.create(text)
+                self._emit(audio, sr, output_queue, chunk_size, device_sample_rate, gen)
+                return
+
+        lang = self._map_lang(language)
+        voice = self._voice_for(language)
+        
+        # Split text into sentences for streaming
+        sentences = self._split_sentences(text)
+        print(f"[TTS] Streaming {len(sentences)} sentences: lang={lang} voice={voice}")
+        
+        resampler = None
+        sentence_count = 0
+        
+        for sentence in sentences:
+            payload, is_phonemes = self._phonemize(sentence, language)
+            print(f"[TTS] Sentence {sentence_count + 1}/{len(sentences)}: {payload!r}")
+            
+            # Generate audio for this sentence
+            async for audio_chunk, sr in self.kokoro.create_stream(
+                text=payload,
+                voice=voice,
+                speed=1.0,
+                lang=lang,
+                is_phonemes=is_phonemes,
+                trim=True,
+            ):
+                resampler = self._emit_chunk(audio_chunk, sr, output_queue, chunk_size, device_sample_rate, gen, resampler)
+            
+            sentence_count += 1
+        
+        print(f"[TTS] Streamed {sentence_count} sentences")
+
+    def _synthesize_stream(self, text, language, output_queue, chunk_size, device_sample_rate, gen):
+        """Sync wrapper for streaming synthesis."""
+        # Create a new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(
+                self._synthesize_stream_async(text, language, output_queue, chunk_size, device_sample_rate, gen)
+            )
+        finally:
+            loop.close()
+
     def _synthesize(self, text, language):
         """Return (audio_float32, sample_rate) for the given text/language."""
         base = _base_lang(language)
@@ -235,8 +325,13 @@ class TTSProcessor:
                 print(f"[TTS] language {language!r} not supported; falling back to English")
         t0 = time.time()
         try:
-            audio, sr = self._synthesize(text.strip(), language)
-            self._emit(audio, sr, output_queue, chunk_size, device_sample_rate, gen)
+            # Use streaming when output_queue is provided (real-time playback)
+            if output_queue is not None and chunk_size is not None and device_sample_rate is not None:
+                self._synthesize_stream(text.strip(), language, output_queue, chunk_size, device_sample_rate, gen)
+            else:
+                # Non-streaming fallback (no queue - direct playback)
+                audio, sr = self._synthesize(text.strip(), language)
+                self._emit(audio, sr, output_queue, chunk_size, device_sample_rate, gen)
         except Exception as e:
             print(f"[TTS] Error: {e}")
             import traceback

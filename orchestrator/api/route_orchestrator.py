@@ -884,6 +884,83 @@ CAR_ACTION_CMD_MAP = {
     ("close", "window"): "close window",
 }
 
+CAR_COMPONENTS = ("left_door", "right_door", "trunk", "light", "ac", "window")
+
+
+def _normalize_car_actions(fn_args: dict) -> list[tuple[str, str]]:
+    """Extract (action, component) pairs from a control_car tool-call args.
+
+    Supports the batch `actions` array and the legacy single fields; dedupes
+    while preserving order.
+    """
+    pairs: list[tuple[str, str]] = []
+
+    def _add(action, component):
+        a = str(action or "").strip().lower()
+        c = str(component or "").strip().lower()
+        if a in ("open", "close", "turn_on", "turn_off") and c in CAR_COMPONENTS:
+            if (a, c) not in pairs:
+                pairs.append((a, c))
+
+    items = fn_args.get("actions")
+    if isinstance(items, list):
+        for it in items:
+            if isinstance(it, dict):
+                _add(it.get("action"), it.get("component"))
+    if not pairs:
+        _add(fn_args.get("action"), fn_args.get("component"))
+    return pairs
+
+
+def _car_confirmation(action: str, component: str, user_lang: str) -> str:
+    """One natural confirmation sentence for a single (action, component)."""
+    if component in ("light", "ac"):
+        act_norm = "turn_on" if action in ("open", "turn_on") else "turn_off"
+    else:
+        act_norm = "open" if action in ("open", "turn_on") else "close"
+    conf_dict = CAR_CONFIRMATIONS.get((act_norm, component), {})
+    sentence = conf_dict.get(user_lang) or conf_dict.get("en")
+    if sentence:
+        return sentence
+    label = CAR_ACTION_CMD_MAP.get((act_norm, component), f"{action} {component}")
+    if user_lang == "vi":
+        return f"Đã thực hiện lệnh {label}."
+    if user_lang == "ja":
+        return f"{label}を実行しました。"
+    return f"{label} executed successfully."
+
+
+def _car_failure_note(failed_pairs: list[tuple[str, str]], user_lang: str) -> str:
+    labels = ", ".join(
+        CAR_ACTION_CMD_MAP.get(
+            (
+                ("turn_on" if a in ("open", "turn_on") else "turn_off")
+                if c in ("light", "ac")
+                else ("open" if a in ("open", "turn_on") else "close"),
+                c,
+            ),
+            f"{a} {c}",
+        )
+        for a, c in failed_pairs
+    )
+    if user_lang == "vi":
+        return f"Xin lỗi, không thể thực hiện: {labels}."
+    if user_lang == "ja":
+        return f"申し訳ありませんが、実行できませんでした: {labels}。"
+    return f"Sorry, I couldn't execute: {labels}."
+
+
+def _build_car_confirmations(
+    ok_pairs: list[tuple[str, str]],
+    failed_pairs: list[tuple[str, str]],
+    user_lang: str,
+) -> str:
+    """Merge per-action confirmations (natural spoken style, no LLM round)."""
+    parts = [_car_confirmation(a, c, user_lang) for a, c in ok_pairs]
+    if failed_pairs:
+        parts.append(_car_failure_note(failed_pairs, user_lang))
+    return " ".join(parts)
+
 
 async def process_request_tool_calling(session_id: str, user_message: str, language: str | None = None):
     logger.info("Processing tool-calling request session_id=%s, message=%r", session_id, user_message)
@@ -962,42 +1039,53 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 _store_assistant_reply(session_id, full_text)
             return
 
-        # ---------------- Case 2: Tool call emitted ----------------
-        tc = tool_calls[0]
-        fn_name = tc.get("name")
-        raw_args = tc.get("arguments", "{}")
-        try:
-            fn_args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-        except Exception:
-            fn_args = {}
+        # ---------------- Case 2: Tool call(s) emitted ----------------
+        # Execute EVERY tool call emitted (was: only tool_calls[0]); merge all
+        # control_car actions into ONE batch dispatch to car_control.
+        parsed_calls = []
+        for tc in tool_calls:
+            _fn = tc.get("name")
+            raw_args = tc.get("arguments", "{}")
+            try:
+                _args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except Exception:
+                _args = {}
+            if not isinstance(_args, dict):
+                _args = {}
+            parsed_calls.append((_fn, _args))
+            logger.info("LLM selected tool=%s args=%s for session_id=%s", _fn, _args, session_id)
 
-        logger.info("LLM selected tool=%s args=%s for session_id=%s", fn_name, fn_args, session_id)
+        car_pairs: list[tuple[str, str]] = []
+        for _fn, _args in parsed_calls:
+            if _fn == "control_car":
+                for pair in _normalize_car_actions(_args):
+                    if pair not in car_pairs:
+                        car_pairs.append(pair)
 
-        # ====== Tool: control_car ======
+        fn_name = "control_car" if car_pairs else (parsed_calls[0][0] if parsed_calls else "")
+        fn_args = parsed_calls[0][1] if parsed_calls else {}
+
+        # ====== Tool: control_car (batch) ======
         if fn_name == "control_car":
-            action = str(fn_args.get("action", "")).strip().lower()
-            component = str(fn_args.get("component", "")).strip().lower()
-
-            cmd_label = CAR_ACTION_CMD_MAP.get((action, component))
-            if not cmd_label:
-                if component in ("light", "ac"):
-                    act_norm = "turn_on" if action in ("open", "turn_on") else "turn_off"
-                else:
-                    act_norm = "open" if action in ("open", "turn_on") else "close"
-                cmd_label = CAR_ACTION_CMD_MAP.get((act_norm, component), f"{action} {component}")
-            else:
-                act_norm = "turn_on" if action in ("open", "turn_on") and component in ("light", "ac") else ("turn_off" if action in ("close", "turn_off") and component in ("light", "ac") else action)
+            cmd_labels = [CAR_ACTION_CMD_MAP.get(p, f"{p[0]} {p[1]}") for p in car_pairs]
 
             await _send_to_session_and_frontend(
                 session_id,
                 {
                     "type": "session_log",
-                    "content": f"[tool_call] control_car action={action} component={component} command={cmd_label!r}",
+                    "content": f"[tool_call] control_car actions={len(car_pairs)} commands={cmd_labels!r}",
                 },
             )
 
-            # Call car_control agent
-            agent_res = await send_to_agent("car_control", cmd_label, context_store, session_id, registry)
+            # ONE batch call to car_control: JSON actions payload
+            batch_payload = json.dumps(
+                {"actions": [{"action": a, "component": c} for a, c in car_pairs]},
+                ensure_ascii=False,
+            )
+            agent_res = await send_to_agent(
+                "car_control", user_message, context_store, session_id, registry,
+                payload_override=batch_payload,
+            )
 
             # Post-process for data payload
             final_agent_response = post_process_agent_response([agent_res])
@@ -1006,18 +1094,23 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 {"type": "data", "content": final_agent_response["data"]},
             )
 
-            # Fast Return Confirmation
-            if agent_res.get("success") is not False:
-                conf_dict = CAR_CONFIRMATIONS.get((act_norm, component), {})
-                confirmation = conf_dict.get(user_lang) or conf_dict.get("en")
-                if not confirmation:
-                    if user_lang == "vi":
-                        confirmation = f"Đã thực hiện lệnh {cmd_label}."
-                    elif user_lang == "ja":
-                        confirmation = f"{cmd_label}を実行しました。"
-                    else:
-                        confirmation = f"{cmd_label} executed successfully."
+            # Per-action success/fail (car_control returns results[]); fall back
+            # to the aggregate success flag for backward compatibility.
+            results = (agent_res.get("meta") or {}).get("results") or []
+            if results:
+                ok_pairs = [
+                    (r.get("action", ""), r.get("component", ""))
+                    for r in results
+                    if r.get("ok")
+                ]
+                failed_pairs = [p for p in car_pairs if p not in ok_pairs]
+            elif agent_res.get("success") is not False:
+                ok_pairs, failed_pairs = list(car_pairs), []
             else:
+                ok_pairs, failed_pairs = [], list(car_pairs)
+
+            confirmation = _build_car_confirmations(ok_pairs, failed_pairs, user_lang)
+            if not confirmation:
                 if user_lang == "vi":
                     confirmation = "Xin lỗi, không thể thực hiện lệnh điều khiển xe này."
                 elif user_lang == "ja":

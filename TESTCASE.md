@@ -147,3 +147,44 @@
 18. Give me a brief overview of the European Union
 19. What is the most popular sport in Germany?
 20. Who is the CEO of Mercedes-Benz?
+
+## 6. Multi-Action Compound Commands (control_car batch)
+Mọi câu dưới đây PHẢI thực hiện ĐỦ các action, trả lời xác nhận đủ từng phần
+(không drop action nào, không hỏi lại "which one").
+
+| # | Câu lệnh | Kỳ vọng |
+|---|---|---|
+| 1 | Open left and right door | mở cả left_door + right_door |
+| 2 | Open the trunk, and open left door | mở trunk + left_door |
+| 3 | Turn on the light and the ac | bật light + ac |
+| 4 | Open both doors | mở cả 2 cửa |
+| 5 | Close all doors | đóng cả 2 cửa |
+| 6 | Open left door and right door | mở cả 2 cửa |
+| 7 | Open the trunk and close the left door | mở trunk + đóng left_door |
+| 8 | Mở cửa trái và cửa phải | mở cả 2 cửa |
+| 9 | Mở cốp và mở cửa trái | mở trunk + left_door |
+| 10 | Bật đèn và điều hòa | bật light + ac |
+| 11 | Mở cả hai cửa | mở cả 2 cửa |
+| 12 | 左のドアと右のドアを開けて | mở cả 2 cửa (ja) |
+| 13 | Open the trunk and turn on the light | mở trunk + bật light |
+
+Regression (1 lệnh đơn phải chạy như cũ):
+| # | Câu lệnh | Kỳ vọng |
+|---|---|---|
+| 14 | Open the left door | chỉ left_door |
+| 15 | Turn off ac | chỉ ac |
+| 16 | Đóng cửa phải | chỉ right_door |
+
+Phần kết quả:
+- Log `[tool_call] control_car actions=N commands=[...]` với N đúng số action.
+- Xác nhận đọc đủ N câu (en/vi/ja theo ngôn ngữ nói).
+- Thất bại 1 phần (vd mất kết nối GraphQL 1 lệnh): "Xin lỗi, không thể thực hiện: ..." + các câu thành công vẫn đọc.
+
+## 7. Voice Interruption (barge-in + wake-word khi đang chờ)
+| # | Tình huống | Kỳ vọng |
+|---|---|---|
+| 1 | Đang chờ orchestrator trả lời → nói "Hey Dora" | ngắt turn cũ, session MỚI, không trộn context |
+| 2 | Dora đang nói → nói "Hey Dora, stop" | TTS cắt ngay, turn mới bắt đầu |
+| 3 | Dora đang nói → nói chèn (VAD barge-in) | TTS cắt, bắt turn mới (giữ session) |
+| 4 | Ngắt giữa chừng rồi hỏi tiếp | không có audio cũ leak ra sau khi ngắt |
+| 5 | "Open left and right door" rồi ngắt giữa câu trả lời | 2 cửa đã mở, câu trả lời bị bỏ dở không đọc tiếp |

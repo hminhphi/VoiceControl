@@ -28,11 +28,14 @@ def send_and_stream(
     post_timeout=30,
     ws_timeout=60,
     language=None,
+    abort_event=None,
 ):
     """
     POST user_message to orchestrator, then consume WebSocket stream.
     Flush to TTS on sentence end (. ! ?) or on done/error.
     `language` is the STT-detected language hint so the LLM replies in-language.
+    `abort_event` (threading.Event): when set (barge-in / wake-word interrupt)
+    the WS stream is closed immediately and pending tokens are dropped.
     """
     base_url = base_url or os.environ.get("ORCHESTRATOR_URL", "http://localhost:8000")
     base_url = base_url.rstrip("/")
@@ -86,6 +89,14 @@ def send_and_stream(
                 print(f"[orchestrator_client] on_segment error: {e}")
 
     def on_ws_message(ws, raw):
+        if abort_event is not None and abort_event.is_set():
+            # Superseded turn: drop the payload and close the stream now so a
+            # queued follow-up turn can start immediately.
+            try:
+                ws.close()
+            except Exception:
+                pass
+            return
         try:
             d = json.loads(raw)
         except Exception:

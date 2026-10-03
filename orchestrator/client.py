@@ -14,6 +14,24 @@ from utils import timeit
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("orchestrator.client")
 
+# Cache agent cards per base URL: avoids one HTTP round-trip per dispatch.
+_AGENT_CARD_CACHE: dict = {}
+_AGENT_CARD_LOCK = asyncio.Lock()
+
+
+async def _get_agent_card(httpx_client: httpx.AsyncClient, url: str):
+    cached = _AGENT_CARD_CACHE.get(url)
+    if cached is not None:
+        return cached
+    async with _AGENT_CARD_LOCK:
+        cached = _AGENT_CARD_CACHE.get(url)
+        if cached is not None:
+            return cached
+        resolver = A2ACardResolver(httpx_client=httpx_client, base_url=url)
+        agent_card = await resolver.get_agent_card()
+        _AGENT_CARD_CACHE[url] = agent_card
+        return agent_card
+
 
 @timeit
 async def send_to_agents_parallel(
@@ -48,17 +66,17 @@ async def send_to_agent(
     context: PerAgentContext,
     session_id: str,
     registry: AgentRegistry,
+    payload_override: str | None = None,
 ) -> dict:
     url = registry.get_url(agent_id)
     if not url:
         return {}
     logger.info("Sending to agent %s at URL %s", agent_id, url)
-    payload_text = user_message
+    payload_text = payload_override if payload_override is not None else user_message
 
     async with httpx.AsyncClient(timeout=300.0) as httpx_client:
-        resolver = A2ACardResolver(httpx_client=httpx_client, base_url=url)
-        agent_card = await resolver.get_agent_card()
-        
+        agent_card = await _get_agent_card(httpx_client, url)
+
         client = A2AClient(httpx_client=httpx_client, agent_card=agent_card)
         req = SendMessageRequest(
             id=uuid4().hex,

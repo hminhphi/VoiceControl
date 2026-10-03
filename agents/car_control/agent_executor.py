@@ -191,29 +191,150 @@ def _get_user_text(context: RequestContext) -> str:
 
 
 def _match_command_tokens(user_text: str) -> list[tuple[str, str]]:
-    matched: list[tuple[str, str]] = []
+    scored: list[tuple[int, tuple[str, str]]] = []
     for action in ("open", "close"):
         for side, component in (("left", "left_door"), ("right", "right_door")):
             patterns = (
                 rf"\b{action}\s+(?:the\s+)?{side}\s+door\b",
                 rf"\b{side}\s+door\s+{action}\b",
             )
-            if any(re.search(pattern, user_text, re.IGNORECASE) for pattern in patterns):
-                pair = (component, action)
-                if pair not in matched:
-                    matched.append(pair)
+            best = None
+            for pattern in patterns:
+                m = re.search(pattern, user_text, re.IGNORECASE)
+                if m and (best is None or m.start() < best):
+                    best = m.start()
+            if best is not None:
+                scored.append((best, (component, action)))
 
         trunk_aliases = "trunk|boot|tailgate"
         patterns = (
             rf"\b{action}\s+(?:the\s+)?(?:{trunk_aliases})\b",
             rf"\b(?:{trunk_aliases})\s+{action}\b",
         )
-        if any(re.search(pattern, user_text, re.IGNORECASE) for pattern in patterns):
-            pair = ("trunk", action)
-            if pair not in matched:
-                matched.append(pair)
+        best = None
+        for pattern in patterns:
+            m = re.search(pattern, user_text, re.IGNORECASE)
+            if m and (best is None or m.start() < best):
+                best = m.start()
+        if best is not None:
+            scored.append((best, ("trunk", action)))
 
-    return matched
+    scored.sort(key=lambda t: t[0])
+    out: list[tuple[str, str]] = []
+    for _, pair in scored:
+        if pair not in out:
+            out.append(pair)
+    return out
+
+
+# Elliptical / coordinated command expansions: rewrite compound forms into
+# concatenated single commands so phrase/lexical matching finds EVERY action.
+# e.g. "open left and right door" -> "open left door open right door"
+_ELLIPTICAL_RES: list[tuple[re.Pattern, "callable"]] = [
+    # open left and right door(s) / close the left and the right doors
+    (
+        re.compile(
+            r"\b(open|close)\s+(?:the\s+)?(left|right)\s+and\s+(?:the\s+)?(left|right)\s+(door|window)s?\b",
+            re.IGNORECASE,
+        ),
+        lambda m: (
+            f"{m.group(1)} {m.group(2)} {m.group(4)} "
+            f"{m.group(1)} {m.group(3)} {m.group(4)}"
+        ),
+    ),
+    # open both doors / close all doors / open the two doors
+    (
+        re.compile(
+            r"\b(open|close)\s+(?:the\s+)?(?:both|all|two)\s+doors?\b",
+            re.IGNORECASE,
+        ),
+        lambda m: f"{m.group(1)} left door {m.group(1)} right door",
+    ),
+    # turn on light and ac / turn off the lights and the ac
+    (
+        re.compile(
+            r"\b(turn on|turn off)\s+(?:the\s+)?(lights?|ac)\s+and\s+(?:the\s+)?(lights?|ac)\b",
+            re.IGNORECASE,
+        ),
+        lambda m: (
+            f"{m.group(1)} {m.group(2).rstrip('s') if m.group(2).lower() != 'ac' else 'ac'} "
+            f"{m.group(1)} {m.group(3).rstrip('s') if m.group(3).lower() != 'ac' else 'ac'}"
+        ),
+    ),
+    # open the trunk and left door (verb ellipsis on 2nd clause)
+    (
+        re.compile(
+            r"\b(open|close)\s+(?:the\s+)?(trunk|boot|tailgate)\s+and\s+(?:the\s+)?(left|right)\s+(door)s?\b",
+            re.IGNORECASE,
+        ),
+        lambda m: f"{m.group(1)} {m.group(2)} {m.group(1)} {m.group(3)} {m.group(4)}",
+    ),
+    # turn on the ac and open window (cross-verb: ac + door/window group)
+    (
+        re.compile(
+            r"\b(turn on|turn off)\s+(?:the\s+)?(ac|lights?)\s+and\s+(open|close)\s+(?:the\s+)?(left|right)\s+(door)s?\b",
+            re.IGNORECASE,
+        ),
+        lambda m: (
+            f"{m.group(1)} {m.group(2).rstrip('s') if m.group(2).lower() != 'ac' else 'ac'} "
+            f"{m.group(3)} {m.group(4)} {m.group(5)}"
+        ),
+    ),
+    # vi: mở/đóng cửa trái và (cửa) phải
+    (
+        re.compile(r"(mở|đóng)\s+cửa\s+(trái|phải)\s+và\s+(?:cửa\s+)?(trái|phải)", re.IGNORECASE),
+        lambda m: f"{m.group(1)} cửa {m.group(2)} {m.group(1)} cửa {m.group(3)}",
+    ),
+    # vi: mở/đóng cả hai cửa (sổ) / mở hai cửa
+    (
+        re.compile(r"(mở|đóng)\s+(?:cả\s+hai|hai|tất\s+cả)\s+cửa", re.IGNORECASE),
+        lambda m: f"{m.group(1)} cửa trái {m.group(1)} cửa phải",
+    ),
+]
+
+
+def _expand_elliptical(text: str) -> str:
+    """Expand coordinated/elliptical commands into concatenated singles."""
+    out = text
+    for pat, repl in _ELLIPTICAL_RES:
+        out = pat.sub(repl, out)
+    return out
+
+
+def _parse_batch_json(text: str) -> tuple[list[tuple[str, str]], dict] | None:
+    """Parse a structured batch payload: {"actions": [{"action","component"}]}.
+
+    Returns (pairs, meta) or None when text is not a batch payload.
+    """
+    raw = (text or "").strip()
+    if not raw.startswith("{"):
+        return None
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    items = data.get("actions")
+    if not isinstance(items, list):
+        return None
+    valid_components = {pair[0] for pair in GRAPHQL_ACTIONS}
+    valid_actions = {"open", "close"}
+    pairs: list[tuple[str, str]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        action = str(it.get("action", "")).strip().lower()
+        component = str(it.get("component", "")).strip().lower()
+        if action == "turn_on":
+            action = "open"
+        elif action == "turn_off":
+            action = "close"
+        if action in valid_actions and component in valid_components:
+            pair = (component, action)
+            if pair not in pairs:
+                pairs.append(pair)
+    return pairs, {"match_source": "batch_json", "batch_size": len(items)}
 
 
 def _match_actions_with_meta(
@@ -224,20 +345,33 @@ def _match_actions_with_meta(
     if not lower:
         return [], {"match_source": "empty"}
 
-    matched: list[tuple[str, str]] = []
-    for phrases, pair in PHRASES_TO_ACTION:
-        if any(p in lower for p in phrases) and pair not in matched:
-            matched.append(pair)
+    # Expand coordinated/elliptical forms first so every action becomes an
+    # explicit phrase: "open left and right door" -> "open left door open right door".
+    expanded = _expand_elliptical(lower)
 
-    if matched:
+    # Phrase matching on the expanded text; keep hits ordered by their
+    # position so actions execute in the order the user said them.
+    hits: list[tuple[int, tuple[str, str]]] = []
+    for phrases, pair in PHRASES_TO_ACTION:
+        for p in phrases:
+            idx = expanded.find(p)
+            if idx >= 0:
+                hits.append((idx, pair))
+                break
+    if hits:
+        hits.sort(key=lambda t: t[0])
+        matched: list[tuple[str, str]] = []
+        for _, pair in hits:
+            if pair not in matched:
+                matched.append(pair)
         return matched, {
-            "match_source": "phrase",
+            "match_source": "elliptical" if expanded != lower else "phrase",
             "matched_label": ", ".join(
                 COMPONENT_ACTION_TO_LABEL.get(pair, " ".join(pair)) for pair in matched
             ),
         }
 
-    matched = _match_command_tokens(user_text)
+    matched = _match_command_tokens(expanded)
     if matched:
         return matched, {
             "match_source": "lexical",
@@ -290,7 +424,12 @@ class CarControlAgentExecutor(AgentExecutor):
             )
             return
 
-        pairs, match_meta = _match_actions_with_meta(text, self._embedding_matcher)
+        # Structured batch payload first ({"actions":[...]}), then text matching.
+        batch = _parse_batch_json(text)
+        if batch is not None:
+            pairs, match_meta = batch
+        else:
+            pairs, match_meta = _match_actions_with_meta(text, self._embedding_matcher)
         if not pairs:
             await event_queue.enqueue_event(
                 new_agent_text_message(json.dumps({
@@ -302,41 +441,65 @@ class CarControlAgentExecutor(AgentExecutor):
             return
 
         actions: list[str] = []
-        for component, action in pairs:
-            label = COMPONENT_ACTION_TO_LABEL.get((component, action))
+        results: list[dict] = []
+
+        def _dispatch_one(component: str, action: str) -> bool:
             fn_name, act = GRAPHQL_ACTIONS[(component, action)]
-            if self._graphql_client:
-                try:
-                    self._graphql_client.send_request(fn_name, {"action": act})
-                except Exception as e:
-                    logger.warning("GraphQL failed: %s", e)
-                    continue
+            if not self._graphql_client:
+                return True
+            try:
+                self._graphql_client.send_request(fn_name, {"action": act})
+                return True
+            except Exception as e:
+                logger.warning("GraphQL failed for %s/%s: %s", component, action, e)
+                return False
+
+        # Parallel dispatch: all GraphQL mutations fire concurrently (stateless
+        # HTTP) so multi-action commands cost ~1 round-trip, not N.
+        import asyncio
+        oks = await asyncio.gather(
+            *[
+                asyncio.to_thread(_dispatch_one, component, action)
+                for component, action in pairs
+            ]
+        )
+
+        for (component, action), ok in zip(pairs, oks):
+            label = COMPONENT_ACTION_TO_LABEL.get((component, action))
 
             # Update local car simulator if active (PC / simulation mode)
-            try:
-                import car_simulator as _cs_mod
-                _sim = getattr(_cs_mod, "_SHARED_SIMULATOR", None)
-                if _sim is not None:
-                    _dispatch = {
-                        "left_door":  ("set_door", action),
-                        "right_door": ("set_door", action),
-                        "trunk":      ("set_trunk", action),
-                        "window":     ("set_window", action),
-                        "light":      ("set_light", action),
-                        "ac":         ("set_ac", action),
-                        "mirror":     ("set_mirror", action),
-                    }
-                    if component in _dispatch:
-                        _m, _a = _dispatch[component]
-                        getattr(_sim, _m)(_a)
-                from state_server import _broadcast_state
-                _broadcast_state()
-            except Exception as _sim_err:
-                logger.debug("Simulator update skipped: %s", _sim_err)
+            if ok:
+                try:
+                    import car_simulator as _cs_mod
+                    _sim = getattr(_cs_mod, "_SHARED_SIMULATOR", None)
+                    if _sim is not None:
+                        _dispatch = {
+                            "left_door":  ("set_door", action),
+                            "right_door": ("set_door", action),
+                            "trunk":      ("set_trunk", action),
+                            "window":     ("set_window", action),
+                            "light":      ("set_light", action),
+                            "ac":         ("set_ac", action),
+                            "mirror":     ("set_mirror", action),
+                        }
+                        if component in _dispatch:
+                            _m, _a = _dispatch[component]
+                            getattr(_sim, _m)(_a)
+                    from state_server import _broadcast_state
+                    _broadcast_state()
+                except Exception as _sim_err:
+                    logger.debug("Simulator update skipped: %s", _sim_err)
 
-            if label:
+            results.append({
+                "component": component,
+                "action": action,
+                "label": label or f"{action} {component}",
+                "ok": ok,
+            })
+            if ok and label:
                 actions.append(label)
 
+        match_meta["results"] = results
         response_text = json.dumps({
             "success": bool(actions),
             "message": actions,

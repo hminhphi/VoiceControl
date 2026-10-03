@@ -116,7 +116,7 @@ services:
       start_period: 90s
     environment:
       - HF_HOME=/app/cache
-      - CAR_MANUAL_BRAND=${CAR_MANUAL_BRAND}
+      - CAR_MANUAL_BRAND=${CAR_MANUAL_BRAND:-toyota}
       - CAR_MANUAL_SEARCH_MODE=${CAR_MANUAL_SEARCH_MODE:-embedding}
       - CAR_MANUAL_EMBEDDING_MODEL=${CAR_MANUAL_EMBEDDING_MODEL:-paraphrase-multilingual-MiniLM-L12-v2}
       - CAR_MANUAL_TOP_K=${CAR_MANUAL_TOP_K:-3}

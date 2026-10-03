@@ -97,7 +97,7 @@ if ($Down) {
     Write-Header "Stopping all services..."
     if (Test-Path $COMPOSE_X86) {
         Write-Step "Stopping Docker containers..."
-        docker compose @COMPOSE_X86_ARGS down 2>$null | Out-Null
+        docker compose @COMPOSE_X86_ARGS down 2>&1 | Out-Null
     }
     Write-Step "Stopping any host service launchers..."
     Get-Process -Name "python*", "pwsh*" -ErrorAction SilentlyContinue | Where-Object {
@@ -219,7 +219,7 @@ if ($Docker) {
         "navigation"  = @{ url = "http://navigation:8003";      enabled = $false }
         "infotainment"= @{ url = "http://infotainment:8004";    enabled = $false }
     }
-    $agentListDocker | ConvertTo-Json -Depth 3 | Set-Content -Path $agentListPath -Encoding UTF8
+    $agentListDocker | ConvertTo-Json -Depth 3 | ForEach-Object { [System.IO.File]::WriteAllText($agentListPath, $_, (New-Object System.Text.UTF8Encoding $false)) }
     Write-Ok "Configured agent_list.json for Docker internal network"
 
     # Services to start
@@ -407,7 +407,7 @@ $agentList = @{
     "navigation"  = @{ url = "http://localhost:8003";     enabled = $false }
     "infotainment"= @{ url = "http://localhost:8004";     enabled = $false }
 }
-$agentList | ConvertTo-Json -Depth 3 | Set-Content -Path $agentListPath -Encoding UTF8
+$agentList | ConvertTo-Json -Depth 3 | ForEach-Object { [System.IO.File]::WriteAllText($agentListPath, $_, (New-Object System.Text.UTF8Encoding $false)) }
 Write-Ok "agent_list.json updated (localhost:$PORT_CC, localhost:$PORT_CM)"
 
 # ── Service Launcher Helper ───────────────────────────────────────────────────
@@ -499,7 +499,7 @@ Start-ServiceWindow -Name "car_manual" `
     -ExtraEnv @{
         CAR_MANUAL_PORT            = "$PORT_CM"
         CAR_MANUAL_BASE_URL        = "http://localhost:$PORT_CM"
-        CAR_MANUAL_BRAND           = "mmc"
+        CAR_MANUAL_BRAND           = "toyota"
         CAR_MANUAL_SEARCH_MODE     = "bm25"
         CAR_MANUAL_SCORE_THRESHOLD = "0.2"
         HF_HOME                    = (Join-Path $cmDir "cache")

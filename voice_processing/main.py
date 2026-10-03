@@ -132,6 +132,10 @@ FOLLOWUP_LISTEN_SEC = _env_float("FOLLOWUP_LISTEN_SEC", 12.0)
 # replies; sustained speech aborts playback and starts a new turn.
 BARGE_IN_ENABLED = os.environ.get("BARGE_IN_ENABLED", "1").strip() in ("1", "true", "yes")
 BARGE_IN_MIN_PLAY_SEC = _env_float("BARGE_IN_MIN_PLAY_SEC", 1.0)
+# Speaker considered "actually speaking" if a playback chunk played within
+# this window; wake-word stays armed during reply gaps and while waiting
+# for the orchestrator response.
+TTS_SPEAKING_GAP_SEC = _env_float("TTS_SPEAKING_GAP_SEC", 0.5)
 VAD_LOG_THRESHOLD = 0.400
 VAD_LOG_INTERVAL = 0.5
 AUDIO_STREAM_RETRY_SEC = float(os.environ.get("AUDIO_STREAM_RETRY_SEC", "3.0"))
@@ -267,7 +271,7 @@ def run():
 
     input_buffer = CircularBuffer(maxsize=BUFFER_MAX)
     output_queue = queue.Queue()
-    stt_queue = queue.Queue(maxsize=5)
+    stt_queue = queue.Queue(maxsize=20)
     audio_log_queue = queue.Queue(maxsize=100)
     # TTS work queue: decouples LLM token reception (WS thread) from
     # blocking Kokoro synthesis so the stream never stalls mid-sentence.
@@ -295,6 +299,11 @@ def run():
     # tagged with an older generation is dropped at playback.
     turn_gen = 0
     tts_play_start = None
+    # Timestamp of the last playback chunk written to the speaker; wake-word
+    # stays armed while waiting for the orchestrator and during reply gaps.
+    last_playback_ts = 0.0
+    # Set by barge-in / wake-word interrupt to abort the in-flight WS stream.
+    abort_reply = Event()
 
     def enqueue_audio_log(event):
         try:
@@ -303,7 +312,7 @@ def run():
             pass
 
     def audio_callback(indata, outdata, frames, time_info, status):
-        nonlocal logged_audio_callback_tid
+        nonlocal logged_audio_callback_tid, last_playback_ts
         if not logged_audio_callback_tid:
             enqueue_audio_log(("callback_tid", get_native_id()))
             logged_audio_callback_tid = True
@@ -325,6 +334,7 @@ def run():
                 else:
                     playback_chunk = item  # raw beep chunk: always play
             outdata[:] = playback_chunk
+            last_playback_ts = time.time()
         except queue.Empty:
             outdata.fill(0)
 
@@ -367,10 +377,34 @@ def run():
             try:
                 chunk = input_buffer.get(CHUNK)
                 now = time.time()
-                if chunk is not None and not is_tts_playing:
+                # Speaker is "actually speaking" only while playback chunks are
+                # fresh; wake-word stays armed while waiting for the orchestrator
+                # response and during gaps inside a reply.
+                speaking_now = (
+                    is_tts_playing and (now - last_playback_ts) < TTS_SPEAKING_GAP_SEC
+                )
+                if chunk is not None and not speaking_now:
                     ww.update_state(chunk.tobytes())
                     if ww.get_detected() and (now - last_wake_word_time) >= WAKE_WORD_DEBOUNCE:
                         last_wake_word_time = now
+                        # Always invalidate queued segments from before the
+                        # wake word so they never mix into the new turn.
+                        turn_gen += 1
+                        if is_tts_playing:
+                            # Wake word during a reply/waiting: abort the
+                            # in-flight turn and start a NEW conversation.
+                            abort_reply.set()
+                            try:
+                                while True:
+                                    output_queue.get_nowait()
+                            except queue.Empty:
+                                pass
+                            is_tts_playing = False
+                            tts_play_start = None
+                            print(
+                                f"[wake_word] Interrupted in-flight reply "
+                                f"(gen={turn_gen}); new conversation"
+                            )
                         ww_detected = True
                         timeout_at = now + VAD_FIRST_TIMEOUT
                         vad_detected_once = False
@@ -425,8 +459,8 @@ def run():
                             max_preroll = int(SPEECH_PREROLL_SEC * DEVICE_SAMPLE_RATE)
                             if len(pre_speech_audio) > max_preroll:
                                 pre_speech_audio = pre_speech_audio[-max_preroll:]
-                elif chunk is not None and is_tts_playing and BARGE_IN_ENABLED:
-                    # ── Barge-in: VAD stays live during TTS playback ──
+                if chunk is not None and is_tts_playing and BARGE_IN_ENABLED:
+                    # �� Barge-in: VAD stays live during TTS playback ��
                     # AEC far-end reference already cancels speaker echo, so
                     # sustained voice here means the user is interrupting.
                     vad.update_buffer(chunk.tobytes())
@@ -441,8 +475,10 @@ def run():
                     play_dur = now - (tts_play_start or now)
                     if vad.is_speech() and play_dur >= BARGE_IN_MIN_PLAY_SEC:
                         # Abort playback now; stale TTS audio tagged with the
-                        # old generation is dropped at playback/output.
+                        # old generation is dropped at playback/output. Also
+                        # abort the in-flight orchestrator WS stream.
                         turn_gen += 1
+                        abort_reply.set()
                         try:
                             while True:
                                 output_queue.get_nowait()
@@ -486,7 +522,7 @@ def run():
                     turn_end_at = last_voice_time + TURN_END_SILENCE
                     if pending_turn and now >= turn_end_at:
                         try:
-                            stt_queue.put(END_TURN, block=False)
+                            stt_queue.put((turn_gen, END_TURN), block=False)
                         except queue.Full:
                             pass
                         print("[TURN] End detected; sending transcript")
@@ -518,7 +554,7 @@ def run():
                                 )
                             else:
                                 try:
-                                    stt_queue.put(audio_segment, block=False)
+                                    stt_queue.put((turn_gen, audio_segment), block=False)
                                     print(
                                         f"[STT] Queued audio segment dur={dur:.2f}s "
                                         f"rms={rms:.5f} peak={peak:.5f}"
@@ -570,9 +606,22 @@ def run():
         turn_texts = []
         turn_lang = None
         turn_audio_parts = []
+        buf_gen = None
         while not stop.is_set():
             try:
-                item = stt_queue.get(timeout=1.0)
+                item_gen, item = stt_queue.get(timeout=1.0)
+                if item_gen != turn_gen:
+                    # Segment queued before a barge-in / wake-word interrupt
+                    # belongs to a superseded turn: drop it.
+                    print(f"[STT] Drop stale segment gen={item_gen} cur={turn_gen}")
+                    continue
+                if buf_gen != item_gen:
+                    # New generation: never mix buffered text/audio of the
+                    # superseded turn into this one.
+                    turn_texts = []
+                    turn_lang = None
+                    turn_audio_parts = []
+                    buf_gen = item_gen
                 if item is END_TURN:
                     text = " ".join(turn_texts).strip()
                     turn_texts = []
@@ -670,6 +719,7 @@ def run():
                     print(f"[ORCH] Sending transcript session={session_id}: {text!r}")
                     is_tts_playing = True
                     tts_play_start = time.time()
+                    abort_reply.clear()
                     try:
                         def on_segment(segment, _rg=req_gen):
                             print(f"[ORCH] Response segment: {segment!r}")
@@ -682,13 +732,17 @@ def run():
                             on_segment,
                             n_chunks=TTS_CHUNK_COUNT,
                             language=lang,
+                            abort_event=abort_reply,
                         )
-                        # Wait until every queued segment is synthesized, then
-                        # until its audio has finished playing.
-                        tts_text_queue.join()
-                        while not output_queue.empty():
-                            time.sleep(0.05)
-                        time.sleep(0.3)
+                        if req_gen == turn_gen:
+                            # Wait until every queued segment is synthesized,
+                            # then until its audio has finished playing. Skip
+                            # when superseded: the interrupting turn owns the
+                            # pipeline now.
+                            tts_text_queue.join()
+                            while not output_queue.empty():
+                                time.sleep(0.05)
+                            time.sleep(0.3)
                     finally:
                         is_tts_playing = False
                         tts_play_start = None

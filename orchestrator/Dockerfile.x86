@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+# ============================================================
+# orchestrator - x86_64 + NVIDIA GPU
+# Kế thừa từ x86-base (torch, numpy/scipy đã có sẵn), cài deps
+# online qua pip. Không dùng wheelhouse aarch64 của Jetson.
+# (Bản arm dùng orchestrator/Dockerfile: l4t-base + offline wheels.)
+# ============================================================
+ARG BASE_IMAGE=orchestrator-on-edge/x86-base:cu128
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY orchestrator/requirements.txt ./
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install -r requirements.txt
+
+COPY orchestrator/*.py ./
+
+CMD ["python3", "main.py"]
