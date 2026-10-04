@@ -68,6 +68,7 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
 # ── 5. STT backends ───────────────────────────────────────────
 # STT_BACKEND=whisper → TensorRT (whisper_trt) on Jetson, same model as x86
 # (WHISPER_MODEL=large-v3, loaded from agent_assets/models/whisper/large-v3.pt).
+# faster-whisper: GPU-accelerated CTranslate2 backend (fallback when TRT unavailable).
 # sherpa-onnx (SenseVoice/Whisper) remains the CPU fallback.
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
@@ -77,6 +78,19 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
         accelerate \
         safetensors \
         librosa
+
+# faster-whisper (CTranslate2) — GPU Whisper large-v3 with highest accuracy.
+# Same install shape as Dockerfile.x86: --no-deps so it does NOT pull the CPU
+# onnxruntime and break the force-installed onnxruntime-gpu below; runtime deps
+# are installed explicitly. Needs network (PyPI) at build time.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-deps "faster-whisper>=1.1.0" \
+    && python3 -m pip install \
+        "ctranslate2>=4.5.0" \
+        huggingface_hub \
+        tokenizers \
+        av \
+        tqdm
 
 # ── 6. TTS (Kokoro ONNX) ──────────────────────────────────────
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \

@@ -18,6 +18,12 @@ Mở `http://localhost:8020`:
 3. **Chạy so sánh** → xem waveform, spectrogram, mức RMS/peak (dBFS) cạnh nhau
    và nghe RAW vs PROCESSED.
 
+## Định dạng file
+
+UI nhận `audio/*`. Ngoài WAV/FLAC/OGG (libsndfile), các file nén `.m4a`/`.mp4`/`.mp3`
+được giải mã qua **ffmpeg** (`pip install` không cần, chỉ cần ffmpeg trong PATH —
+đã có sẵn trên máy dev). Sample rate và số kênh được giữ nguyên khi giải mã.
+
 ## Ghi chú
 
 - **AEC thật cần far-end (âm loa đang phát)**. Ở lab offline không có playback
@@ -27,5 +33,14 @@ Mở `http://localhost:8020`:
 - `Denoise` dùng `noisereduce` (spectral gating, chạy CPU). Nếu chưa cài thì toggle
   sẽ báo "không" ở góc phải header.
 - Các tham số ánh xạ trực tiếp sang biến môi trường trong `aec.py`
-  (`AEC_NS_LEVEL`, `AEC_AGC_MAX_GAIN_DB`, `AEC_AGC1_*`, …) — thử ở đây rồi chép
-  giá trị ưng ý vào `.env`/`.env.x86`.
+  (`AEC_NS_LEVEL`, `AEC_AGC_MAX_GAIN_DB`, `AEC_AGC1_*`, `AEC_LIMITER_*`) — thử ở
+  đây rồi chép giá trị ưng ý vào `.env`/`.env.x86`.
+- **Limiter luôn bật mặc định** (`AEC_LIMITER_ENABLED=1`, trần `AEC_LIMITER_CEILING_DBFS=-1`).
+  AGC1/AGC2 chỉ tăng gain, không có limiter, nên mic yếu sẽ đẩy peak lên 0 dBFS và
+  méo. Tắt limiter để thấy rõ hiệu ứng clipping.
+- **Target-level (AGC1) hiện do `aec.py` tự hiện thực**, không dùng
+  `gain_control1` của WebRTC: field `target_level_dbfs` trong binding py-xiaozhi
+  không có tác dụng (đặt −3 và −12 cho output giống hệt từng bit) và AGC1 không
+  có limiter.
+- Audio được nạp theo block giống runtime thật, nên slider phản ánh đúng như khi
+  chạy mic thật.

@@ -25,13 +25,24 @@ Environment variables:
     AEC_NS_LINEAR=0        NS analyses linear AEC output (stronger; default: 0)
     AEC_HPF_FULL_BAND=1    high-pass applies in full band (default: 1)
     AEC_MOBILE_MODE=0      echo canceller mobile mode (default: 0)
+    AEC_ECHO_ENABLED=1     echo canceller itself. Set 0 when there is NO far-end
+                            (offline recording / lab without a reference file) —
+                            an echo canceller with no reference gates the near-end
+                            speech and sounds choppy (default: 1)
     AEC_EXPORT_LINEAR=0    export linear AEC output (default: 0)
-    AEC_AGC1_ENABLED=0     optional AGC1 target-level loudness + limiter (default: 0)
-    AEC_AGC1_TARGET_DBFS=-3  AGC1 target level (default: -3)
-    AEC_AGC1_COMPRESSION_DB=9 AGC1 compression gain (default: 9)
-    AEC_AGC1_LIMITER=1     AGC1 limiter (default: 1)
+    AEC_AGC1_ENABLED=0     optional target-level loudness + limiter (default: 0)
+    AEC_AGC1_TARGET_DBFS=-3  target RMS level (default: -3)
+    AEC_AGC1_MAX_GAIN_DB=12   bound on how far the target gain may lift (default: 12.0)
+    AEC_AGC1_MIN_GAIN_DB=-6   bound on how far it may attenuate (default: -6.0)
+    AEC_AGC1_SLEW_DB=3.0      max gain change per block, avoids pumping (default: 3.0)
+    AEC_AGC1_NOISE_FLOOR_DBFS=-55  below this the target gain is released (default: -55.0)
+    AEC_LIMITER_ENABLED=1  output limiter, prevents clipping from any AGC (default: 1)
+    AEC_LIMITER_CEILING_DBFS=-3.0  limiter ceiling (default: -3.0)
+    AEC_LIMITER_KNEE=0.7    fraction of the ceiling where soft saturation
+                            starts; 1.0 = hard clip (crackles), 0 = all soft
     AEC_AGC_HEADROOM_DB=5  target headroom below clipping (default: 5.0)
-    AEC_AGC_MAX_GAIN_DB=30 max adaptive boost for weak mics (default: 30.0)
+    AEC_AGC_MAX_GAIN_DB=30 max adaptive boost for weak mics (default: 30.0).
+                        The limiter below is what keeps that boost from clipping.
     AEC_AGC_INITIAL_GAIN_DB=15 starting gain, converges down/up (default: 15.0)
     AEC_AGC_MAX_SPEED_DB=12 max gain slew rate dB/s, faster onset after silence (default: 12.0)
     AEC_AGC_MAX_NOISE_DBFS=-50.0 noise floor cap so silence isn't pumped (default)
@@ -108,6 +119,10 @@ class AecEngine:
         self._far_resampler = None    # device_rate → 16kHz
         self._out_resampler = None    # 16kHz → device_rate
         self._far_dropped = 0
+        # Input samples carried over between blocks so the APM only ever sees
+        # full 160-sample frames. Padding a partial frame with zeros/edge values
+        # makes the noise suppressor re-learn its noise floor and gate speech.
+        self._remainder = None
 
         # ctypes buffers (reused to avoid alloc in hot path)
         self._near_in = (ctypes.c_short * self._frame)()
@@ -127,8 +142,10 @@ class AecEngine:
                 f"[AEC] Active | near={self._near_rate}Hz far={self._far_rate}Hz "
                 f"apm={self._apm_rate}Hz delay={self._delay_ms}ms "
                 f"preprocess={enable_preprocess} "
+                f"echo={getattr(self, '_echo_enabled', False)} "
                 f"agc={getattr(self, '_agc_enabled', False)} "
                 f"agc1={getattr(self, '_agc1_enabled', False)} "
+                f"limiter={getattr(self, '_limiter_enabled', False)} "
                 f"ns={getattr(self, '_ns_level', 'n/a')} "
                 f"ns_linear={getattr(self, '_ns_linear', False)} "
                 f"pre_gain={getattr(self, '_pre_gain', 1.0)}",
@@ -151,7 +168,13 @@ class AecEngine:
 
         self._apm = apm_mod.WebRTCAudioProcessing()
         config = apm_mod.create_default_config()
-        config.echo.enabled = True
+        # The echo canceller NEEDS a far-end (speaker) reference. Run it without
+        # one and it cannot prove there is no echo, so it suppresses the near-end
+        # speech as residual echo — with NS on that gating is audible as
+        # crackling/choppy audio. AEC_ECHO_ENABLED=0 keeps the rest of the chain
+        # (NS/HPF/transient/AGC) working on an offline recording.
+        self._echo_enabled = _env_bool("AEC_ECHO_ENABLED", True)
+        config.echo.enabled = self._echo_enabled
         config.echo.mobile_mode = _env_bool("AEC_MOBILE_MODE", False)
         config.echo.export_linear_aec_output = _env_bool("AEC_EXPORT_LINEAR", False)
         if enable_preprocess:
@@ -202,20 +225,25 @@ class AecEngine:
                 "AEC_AGC_MAX_NOISE_DBFS", -50.0
             )
 
-        # ── Optional AGC1 (target-level loudness + limiter) ──────────
-        # Complements AGC2: drives the level toward a fixed target and limits
-        # peaks. Useful to make a weak mic loud enough for the ASR model.
-        # Env: AEC_AGC1_ENABLED=1, AEC_AGC1_TARGET_DBFS=-3,
-        #      AEC_AGC1_COMPRESSION_DB=9, AEC_AGC1_LIMITER=1
-        self._agc1_enabled = _env_bool("AEC_AGC1_ENABLED", False)
+        # ── Optional target-level loudness (own implementation) ──
+        # NOT WebRTC's gain_control1: in this py-xiaozhi binding
+        # gain_control1.target_level_dbfs is inert (verified: -3 and -12 give
+        # bit-identical output) and AGC1 has no output limiter, so a boosted
+        # peak just clips. Implemented in _apply_level_control instead, where
+        # the target is observable and the ceiling is enforced.
         self._ns_linear = _env_bool("AEC_NS_LINEAR", False)
-        if self._agc1_enabled:
-            gc1 = config.gain_control1
-            gc1.enabled = True
-            gc1.controller_mode = apm_mod.GainController1Mode.ADAPTIVE_DIGITAL
-            gc1.target_level_dbfs = int(_env_float("AEC_AGC1_TARGET_DBFS", -3.0))
-            gc1.compression_gain_db = int(_env_float("AEC_AGC1_COMPRESSION_DB", 9.0))
-            gc1.enable_limiter = _env_bool("AEC_AGC1_LIMITER", True)
+        self._agc1_enabled = _env_bool("AEC_AGC1_ENABLED", False)
+        self._target_dbfs = _env_float("AEC_AGC1_TARGET_DBFS", -3.0)
+        self._agc1_max_gain = _env_float("AEC_AGC1_MAX_GAIN_DB", 12.0)
+        self._agc1_min_gain = _env_float("AEC_AGC1_MIN_GAIN_DB", -6.0)
+        self._agc1_slew = _env_float("AEC_AGC1_SLEW_DB", 3.0)
+        self._agc1_floor = _env_float("AEC_AGC1_NOISE_FLOOR_DBFS", -55.0)
+        self._gain_db = 0.0
+        # Limiter also runs with AGC2 only: AGC2 has no output limiter, so a
+        # weak-mic boost otherwise reaches full scale and clips.
+        self._limiter_enabled = _env_bool("AEC_LIMITER_ENABLED", True)
+        self._ceiling = 10.0 ** (_env_float("AEC_LIMITER_CEILING_DBFS", -3.0) / 20.0)
+        self._knee = min(1.0, max(0.0, _env_float("AEC_LIMITER_KNEE", 0.7)))
 
         # ── Optional fixed pre-amp (manual override, default off) ───
         # Env: AEC_PRE_GAIN=2.0  (linear factor; 1.0 = disabled)
@@ -227,6 +255,20 @@ class AecEngine:
         ret = self._apm.apply_config(config)
         if ret != 0:
             raise RuntimeError(f"apply_config returned {ret}")
+
+        # An APM with every processor disabled returns silence (nothing consumes
+        # the stream). Degrade to passthrough instead of emitting zeros.
+        if not any(
+            (
+                self._echo_enabled,
+                config.noise_suppress.enabled,
+                config.high_pass.enabled,
+                config.transient_suppress.enabled,
+                getattr(self, "_agc_enabled", False),
+                getattr(self, "_agc1_enabled", False),
+            )
+        ):
+            raise RuntimeError("no APM processor enabled")
 
         self._stream_cfg = self._apm.create_stream_config(self._apm_rate, 1)
         self._apm.set_stream_delay_ms(self._delay_ms)
@@ -299,20 +341,94 @@ class AecEngine:
             with self._lock:
                 if not self._active:
                     return block
-                self._drain_far_locked()
+                # Near frames this block will push, so the reference can be fed
+                # in lockstep (see _drain_far_locked).
+                pending = len(self._remainder) if self._remainder is not None else 0
+                need_frames = (pending + len(near_16k)) // self._frame
+                self._drain_far_locked(need_frames)
                 self._apm.set_stream_delay_ms(self._delay_ms)
 
-                # Step 3: process near in 10 ms frames
+                # Step 3: process near in 10 ms frames (remainder carried over,
+                # never padded)
                 out_16k = self._run_near_frames(near_16k)
 
-            # Step 4: resample output back to device rate
-            result = self._resample_output(out_16k, len(block))
+            # Step 4: the APM returns whole 10 ms frames, so the length oscillates by up
+            # to one frame. Keep the surplus in a FIFO — never pad, because the
+            # noise suppressor legitimately outputs digital silence, and padding
+            # with that turns each block into a short gap ("tách tách").
+            if self._out_remainder is not None and len(self._out_remainder):
+                out_16k = np.concatenate([self._out_remainder, out_16k])
+                self._out_remainder = None
+
+            if len(out_16k) < len(block):
+                # Startup only (before a full frame of slack accumulated): keep
+                # the processed audio and pass the input through untouched, so
+                # there is no gap and no drift.
+                self._out_remainder = out_16k
+                return block
+
+            # Step 5: resample output back to device rate
+            result = self._resample_output(out_16k[: len(block)], len(block))
+            if len(out_16k) > len(block):
+                self._out_remainder = out_16k[len(block):]
+
+            # Step 6: target-level gain + limiter (guards against clipping)
+            result = self._apply_level_control(result)
+
             self._fail_count = 0
             return result
 
         except Exception as e:
             self._on_failure("near", e)
             return block
+
+    def _apply_level_control(self, x: np.ndarray) -> np.ndarray:
+        """Bounded gain toward AEC_AGC1_TARGET_DBFS plus an output limiter.
+
+        Applied to the APM output at device rate, so it also catches peaks
+        produced by the resamplers. The limiter is what guarantees the output
+        never reaches full scale: AGC2 and AGC1 are both gain-only stages and
+        will happily push a weak-mic peak to 0.0 dBFS (clipping) without it.
+        """
+        if not self._limiter_enabled and not self._agc1_enabled:
+            return x
+
+        out = x
+        if self._agc1_enabled and out.size:
+            rms = float(np.sqrt(np.mean(np.square(out, dtype=np.float64))))
+            rms_db = 20.0 * np.log10(rms) if rms > 1e-9 else -120.0
+            if rms_db > self._agc1_floor:
+                want = min(self._agc1_max_gain, max(self._agc1_min_gain,
+                                                   self._target_dbfs - rms_db))
+                step = min(self._agc1_slew, max(-self._agc1_slew,
+                                                want - self._gain_db))
+                self._gain_db += step
+            else:
+                # Below the noise floor: decay toward unity instead of holding
+                # (or raising) the gain, otherwise room tone gets pumped up.
+                self._gain_db *= 0.9
+            out = out * (10.0 ** (self._gain_db / 20.0))
+
+        if self._limiter_enabled and self._ceiling > 0.0:
+            knee = self._ceiling * self._knee
+            if knee < self._ceiling:
+                # Soft knee: linear below `knee`, tanh saturation up to the
+                # ceiling. A hard clip here is what makes AGC-boosted audio
+                # crackle ("tách tách") — the slope breaks at the threshold.
+                a = np.abs(out)
+                over = a > knee
+                if np.any(over):
+                    span = self._ceiling - knee
+                    # Masked assignment: np.where + copysign would try to
+                    # broadcast the (n_over,) shaped array against the whole
+                    # block and blow up whenever only a few samples exceed the
+                    # knee (i.e. quiet blocks).
+                    out = out.copy()
+                    out[over] = np.copysign(
+                        knee + span * np.tanh((a[over] - knee) / span), out[over]
+                    )
+            out = np.clip(out, -self._ceiling, self._ceiling)
+        return out
 
     def set_delay_ms(self, delay_ms: int) -> None:
         self._delay_ms = int(delay_ms)
@@ -343,16 +459,29 @@ class AecEngine:
         return self._numpy_resample(out_16k, self._apm_rate, self._near_rate)
 
     def _run_near_frames(self, near_16k: np.ndarray) -> np.ndarray:
+        # Prepend the remainder from the previous call so every frame the APM
+        # sees is full audio — never a partial frame padded with zeros.
+        if self._remainder is not None and len(self._remainder):
+            near_16k = np.concatenate([self._remainder, near_16k])
+        self._remainder = None
+        # Processed-audio surplus (0..159 samples) carried to the next block so
+        # the APM's whole-frame output can always fill the caller's block.
+        self._out_remainder = None
+
         n = len(near_16k)
-        # Pad to frame boundary
-        remainder = n % self._frame
-        if remainder:
-            near_16k = np.concatenate(
-                [near_16k, np.zeros(self._frame - remainder, dtype=np.float32)]
-            )
-        out = np.empty(len(near_16k), dtype=np.float32)
-        i16 = self._f32_to_i16(near_16k)
-        for off in range(0, len(near_16k), self._frame):
+        n_frames = n // self._frame
+        usable = n_frames * self._frame
+
+        if n_frames == 0:
+            self._remainder = near_16k.copy()
+            return np.zeros(0, dtype=np.float32)
+
+        if n > usable:
+            self._remainder = near_16k[usable:].copy()
+
+        out = np.empty(usable, dtype=np.float32)
+        i16 = self._f32_to_i16(near_16k[:usable])
+        for off in range(0, usable, self._frame):
             ctypes.memmove(self._near_in, i16[off: off + self._frame].ctypes.data, self._frame * 2)
             ret = self._apm.process_stream(self._near_in, self._stream_cfg, self._stream_cfg, self._near_out)
             if ret != 0:
@@ -360,10 +489,18 @@ class AecEngine:
             out[off: off + self._frame] = (
                 np.frombuffer(self._near_out, dtype=np.int16).astype(np.float32) / 32768.0
             )
-        return out[:n]  # trim back to original length
+        return out
 
-    def _drain_far_locked(self) -> None:
-        """Resample and feed all pending far-end frames to APM (call under lock)."""
+    def _drain_far_locked(self, need_frames: int) -> None:
+        """Feed the far-end reference, time-aligned with the near stream.
+
+        Exactly `need_frames` reverse frames are fed per capture block, padding
+        with silence when the speaker produced less audio. The reverse stream
+        must advance in lockstep with the near stream: when it is starved (TTS
+        idle → no `process_reverse_stream` calls at all) the echo path falls
+        behind and the residual echo suppressor starts gating the mic in bursts,
+        which is audible as choppy/"tách tách" speech.
+        """
         while self._far_pending:
             mono = self._far_pending.popleft()
             if self._far_resampler is not None:
@@ -373,18 +510,26 @@ class AecEngine:
             if len(mono):
                 self._far_buffer = np.concatenate((self._far_buffer, mono))
 
-        n_frames = len(self._far_buffer) // self._frame
-        if n_frames == 0:
-            return
+        # Real audio first, but never more than this block needs — surplus stays
+        # buffered so the reference cannot drift ahead of the near stream.
+        avail = min(len(self._far_buffer) // self._frame, max(need_frames, 0))
+        if avail:
+            usable = avail * self._frame
+            i16 = self._f32_to_i16(self._far_buffer[:usable])
+            self._far_buffer = self._far_buffer[usable:]
+            for off in range(0, usable, self._frame):
+                ctypes.memmove(self._far_in, i16[off: off + self._frame].ctypes.data, self._frame * 2)
+                ret = self._apm.process_reverse_stream(
+                    self._far_in, self._stream_cfg, self._stream_cfg, self._far_out
+                )
+                if ret != 0:
+                    raise RuntimeError(f"process_reverse_stream returned {ret}")
 
-        usable = n_frames * self._frame
-        i16 = self._f32_to_i16(self._far_buffer[:usable])
-        self._far_buffer = self._far_buffer[usable:]
-
-        for off in range(0, usable, self._frame):
-            ctypes.memmove(self._far_in, i16[off: off + self._frame].ctypes.data, self._frame * 2)
+        # Pad the rest with digital silence so the echo path stays fed.
+        silence = (ctypes.c_short * self._frame)()
+        for _ in range(max(need_frames, 0) - avail):
             ret = self._apm.process_reverse_stream(
-                self._far_in, self._stream_cfg, self._stream_cfg, self._far_out
+                silence, self._stream_cfg, self._stream_cfg, self._far_out
             )
             if ret != 0:
                 raise RuntimeError(f"process_reverse_stream returned {ret}")

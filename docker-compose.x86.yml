@@ -184,9 +184,9 @@ services:
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
       # Vietnamese TTS (sherpa-onnx Piper)
       - PIPER_VI_DIR=${PIPER_VI_DIR:-/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium}
-      # Execution providers: cuda = GPU nếu có, tự fallback cpu nếu không
+      # Execution providers: tên EP đúng danh của onnxruntime (KHÔNG phải "cuda")
       # (Dockerfile.x86 đã restore onnxruntime-gpu -> CUDA EP có thật trong container)
-      - ONNX_PROVIDER=${ONNX_PROVIDER:-cuda}       # Kokoro TTS / VAD
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-CUDAExecutionProvider}   # Kokoro TTS / VAD
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word (wheel PyPI = CPU)
       - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
@@ -206,7 +206,10 @@ services:
       - STT_BACKEND=${STT_BACKEND:-whisper}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - STT_LANGUAGE=${STT_LANGUAGE:-auto}
-      # faster-whisper (GPU)
+      # faster-whisper (GPU) — CTranslate2 CUDA, giống hệt Jetson
+      # FASTER_WHISPER_MODEL trỏ thư mục CT2 local (đã có trong bundle ở
+      # /app/agent_assets/models/...); để trống thì dùng WHISPER_MODEL
+      - FASTER_WHISPER_MODEL=${FASTER_WHISPER_MODEL:-}
       - FASTER_WHISPER_DEVICE=${FASTER_WHISPER_DEVICE:-cuda}
       - FASTER_WHISPER_COMPUTE=${FASTER_WHISPER_COMPUTE:-float16}
       - FASTER_WHISPER_BEAM=${FASTER_WHISPER_BEAM:-5}
@@ -224,10 +227,17 @@ services:
       - AEC_ENABLED=${AEC_ENABLED:-1}
       - AEC_DELAY_MS=${AEC_DELAY_MS:-60}
       - AEC_NOISE_SUPPRESS=${AEC_NOISE_SUPPRESS:-1}
-      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-high}
-      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-1}
-      # AGC2 adaptive digital + pre-amp (mic yếu)
-      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-1}
+      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-low}
+      - AEC_NS_LINEAR=${AEC_NS_LINEAR:-1}
+      - AEC_HPF_FULL_BAND=${AEC_HPF_FULL_BAND:-0}
+      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-0}
+      # Limiter đầu ra: AGC chỉ tăng gain nên không có limiter thì peak bị cắt cứng
+      # (tiếng "tách tách"). Soft knee, trần -3 dBFS.
+      - AEC_LIMITER_ENABLED=${AEC_LIMITER_ENABLED:-1}
+      - AEC_LIMITER_CEILING_DBFS=${AEC_LIMITER_CEILING_DBFS:--3.0}
+      - AEC_LIMITER_KNEE=${AEC_LIMITER_KNEE:-0.7}
+      # AGC2 adaptive digital + pre-amp (weak mics)
+      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-0}
       - AEC_AGC_HEADROOM_DB=${AEC_AGC_HEADROOM_DB:-5.0}
       - AEC_AGC_MAX_GAIN_DB=${AEC_AGC_MAX_GAIN_DB:-30.0}
       - AEC_AGC_INITIAL_GAIN_DB=${AEC_AGC_INITIAL_GAIN_DB:-15.0}

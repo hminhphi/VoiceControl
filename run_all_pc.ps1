@@ -137,18 +137,29 @@ function Start-VoiceHost {
         $lines = @()
         $lines += "`$host.UI.RawUI.WindowTitle = '[voice_processing - Real Mic]'"
         $lines += "`$env:ORCHESTRATOR_URL = 'http://localhost:$PORT_ORCH'"
-        $lines += "`$env:STT_BACKEND = 'whisper'"
+        $lines += "`$env:STT_BACKEND = 'faster_whisper'"
         $lines += "`$env:STT_MODEL_TYPE = 'sense_voice'"
         $lines += "`$env:STT_LANGUAGE = 'auto'"
         $lines += "`$env:TTS_LANGUAGE = ''"
         $lines += "`$env:WHISPER_MODEL = 'large-v3'"
         $lines += "`$env:FASTER_WHISPER_DEVICE = 'cuda'"
         $lines += "`$env:FASTER_WHISPER_COMPUTE = 'float16'"
+        # Weights CTranslate2 local (không tải HuggingFace). Jetson dùng
+        # /app/agent_assets/models/... vì voice_processing được mount vào /app;
+        # trên host venv nó nằm trong $VOICE_DIR. Cùng logic, khác path theo OS.
+        $ct2Model = Join-Path $VOICE_DIR "agent_assets\models\faster-whisper-large-v3"
+        $lines += "`$env:FASTER_WHISPER_MODEL = '$ct2Model'"
         # Same HF cache the x86 container uses (./cache/voice_processing -> /app/cache)
         # so the prefetched Whisper model is shared (fetch_assets asr-fw).
         $lines += "`$env:HF_HOME = '$ROOT\cache\voice_processing'"
-        # cuBLAS/cuDNN for CTranslate2 (faster-whisper GPU) from the nvidia wheels
-        $lines += "`$env:PATH = '$VENV_PC\Lib\site-packages\nvidia\cublas\bin;$VENV_PC\Lib\site-packages\nvidia\cudnn\bin;' + `$env:PATH"
+        # ONNX execution providers — phải là TÊN EP đúng danh của onnxruntime.
+        # Giống .env / docker-compose (Jetson + x86).
+        $lines += "`$env:ONNX_PROVIDER = 'CUDAExecutionProvider'"
+        $lines += "`$env:VAD_PROVIDER = 'cuda'"
+        $lines += "`$env:SHERPA_PROVIDER = 'cpu'"
+        # onnxruntime-gpu 1.30 build cho CUDA 13 -> cần cublasLt64_13/cudnn (cu13).
+        # CTranslate2 (faster-whisper) dùng bộ cu12. Cho cả hai vào PATH.
+        $lines += "`$env:PATH = '$VENV_PC\Lib\site-packages\nvidia\cu13\bin\x86_64;$VENV_PC\Lib\site-packages\nvidia\cudnn\bin;$VENV_PC\Lib\site-packages\nvidia\cublas\bin;$VENV_PC\Lib\site-packages\nvidia\cuda_nvrtc\bin;' + `$env:PATH"
         $lines += "`$env:STT_MODEL_DIR = '$VOICE_DIR\agent_assets\models\asr'"
         $lines += "`$env:STT_WHISPER_DIR = '$VOICE_DIR\agent_assets\models\asr_whisper'"
         $lines += "`$env:STT_WHISPER_MODEL = 'small'"
@@ -164,11 +175,16 @@ function Start-VoiceHost {
         $lines += "`$env:AEC_ENABLED = '1'"
         $lines += "`$env:AEC_DELAY_MS = '60'"
         $lines += "`$env:AEC_NOISE_SUPPRESS = '1'"
-        $lines += "`$env:AEC_NS_LEVEL = 'high'"
-        $lines += "`$env:AEC_TRANSIENT_SUPPRESS = '1'"
-        $lines += "`$env:AEC_AGC_ENABLED = '1'"
+        $lines += "`$env:AEC_NS_LEVEL = 'low'"
+        $lines += "`$env:AEC_NS_LINEAR = '1'"
+        $lines += "`$env:AEC_HPF_FULL_BAND = '0'"
+        $lines += "`$env:AEC_TRANSIENT_SUPPRESS = '0'"
+        $lines += "`$env:AEC_AGC_ENABLED = '0'"
         $lines += "`$env:AEC_AGC_MAX_GAIN_DB = '30.0'"
         $lines += "`$env:AEC_AGC_INITIAL_GAIN_DB = '15.0'"
+        $lines += "`$env:AEC_LIMITER_ENABLED = '1'"
+        $lines += "`$env:AEC_LIMITER_CEILING_DBFS = '-3.0'"
+        $lines += "`$env:AEC_LIMITER_KNEE = '0.7'"
         $lines += "`$env:BARGE_IN_ENABLED = '1'"
         $lines += "`$env:BARGE_IN_MIN_PLAY_SEC = '1.0'"
         $lines += "`$env:SEGMENT_SILENCE = '1.0'"

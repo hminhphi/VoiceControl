@@ -83,7 +83,9 @@ def resample_audio(audio_int16, original_sr, target_sr):
             np.arange(len(audio_int16)),
             audio_f32,
         )
-    return samples
+    # Always hand back float32: the resampler and np.interp both yield float64,
+    # which faster-whisper's Silero VAD rejects ("expected tensor(float)").
+    return np.asarray(samples, dtype=np.float32)
 
 
 def _apply_local_whisper_patch(model_name):
@@ -193,13 +195,30 @@ def _unified_whisper_model():
 
     `WHISPER_MODEL` is the primary name; `STT_MODEL`/`FASTER_WHISPER_MODEL`
     remain as legacy overrides. Defaults to `large-v3` (multilingual vi/en/ja).
+
+    An override naming an EXISTING local directory wins over `WHISPER_MODEL`:
+    offline deployments (Jetson bundle ships CTranslate2 weights, which are not
+    the TensorRT `large-v3.pt`) must not fall back to a HuggingFace download.
+    A stale path or a bare model name does not shadow `WHISPER_MODEL`.
     """
+
+    def _clean(value):
+        return (value or "").strip()
+
+    for override in (
+        os.environ.get("FASTER_WHISPER_MODEL"),
+        os.environ.get("STT_MODEL"),
+    ):
+        candidate = _clean(override)
+        if candidate and os.path.isdir(candidate):
+            return candidate
+
     return (
-        os.environ.get("WHISPER_MODEL")
-        or os.environ.get("STT_MODEL")
-        or os.environ.get("FASTER_WHISPER_MODEL")
+        _clean(os.environ.get("WHISPER_MODEL"))
+        or _clean(os.environ.get("STT_MODEL"))
+        or _clean(os.environ.get("FASTER_WHISPER_MODEL"))
         or "large-v3"
-    ).strip()
+    )
 
 
 def _float_samples_to_int16(samples):

@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 dependencies = [
     "a2a-sdk",
     "httpx",
+    "numpy>=2.4.6",
     "uvicorn",
 ]
 

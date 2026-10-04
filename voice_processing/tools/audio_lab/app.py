@@ -71,9 +71,44 @@ def _resample(x: np.ndarray, sr: int, target: int) -> np.ndarray:
         return np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x).astype(np.float32)
 
 
+def _decode_with_ffmpeg(path: Path) -> Path:
+    """Decode a compressed container to PCM_16 WAV via ffmpeg.
+
+    soundfile/libsndfile only reads WAV/FLAC/OGG, so uploads like .m4a/.mp4/.mp3
+    (AAC) fail in `sf.read`. Sample rate and channel layout are preserved so the
+    preprocessing chain sees exactly what it would with a native WAV.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        raise RuntimeError(
+            f"Cannot read {path.suffix or 'this format'}: libsndfile supports "
+            "WAV/FLAC/OGG only. Install ffmpeg (winget install ffmpeg) or convert "
+            "the file to WAV first."
+        )
+    tmp_dir = Path(tempfile.mkdtemp(prefix="audio_lab_"))
+    out = tmp_dir / (path.stem + ".wav")
+    proc = subprocess.run(
+        [exe, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+         "-i", str(path), "-c:a", "pcm_s16le", str(out)],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or not out.exists():
+        raise RuntimeError(
+            f"ffmpeg could not decode {path.name}: {proc.stderr.strip()[:400]}"
+        )
+    return out
+
+
 def load_wav(path: Path):
     import soundfile as sf
-    x, sr = sf.read(str(path), dtype="float32")
+    try:
+        x, sr = sf.read(str(path), dtype="float32")
+    except Exception:
+        x, sr = sf.read(str(_decode_with_ffmpeg(path)), dtype="float32")
     if x.ndim > 1:
         x = x[:, 0]
     return x.astype(np.float32), int(sr)
@@ -169,36 +204,57 @@ def process_file(src: Path, opts: dict) -> Path:
 
     x, sr = load_wav(src)
 
+    # A far-end (speaker) reference has to be loaded BEFORE the engine is built:
+    # the echo canceller gates the near-end speech when it has no reference, so
+    # on an offline recording it must stay off (measured: maxdiff 0.32 -> 0.75
+    # and 6 discontinuities once NS joins in).
+    far = None
+    if opts.get("aec", True) and opts.get("far_file"):
+        try:
+            far, _ = load_wav(REC_DIR / str(opts["far_file"]))
+        except Exception:
+            far = None
+    has_far = far is not None and len(far) > 0
+
     # The APM reads its config from env at construction time.
     os.environ["AEC_ENABLED"] = "1" if opts.get("aec", True) else "0"
+    os.environ["AEC_ECHO_ENABLED"] = "1" if has_far else "0"
     os.environ["AEC_NOISE_SUPPRESS"] = "1" if opts.get("ns", True) else "0"
     os.environ["AEC_NS_LEVEL"] = str(opts.get("ns_level", "high"))
     os.environ["AEC_NS_LINEAR"] = "1" if opts.get("ns_linear") else "0"
     os.environ["AEC_HPF_FULL_BAND"] = "1" if opts.get("hpf", True) else "0"
     os.environ["AEC_TRANSIENT_SUPPRESS"] = "1" if opts.get("transient", True) else "0"
     os.environ["AEC_AGC_ENABLED"] = "1" if opts.get("agc2", True) else "0"
-    os.environ["AEC_AGC_MAX_GAIN_DB"] = str(opts.get("agc2_max_gain", 30.0))
+    os.environ["AEC_AGC_MAX_GAIN_DB"] = str(opts.get("agc2_max_gain", 12.0))
     os.environ["AEC_AGC_MAX_NOISE_DBFS"] = str(opts.get("agc2_max_noise", -50.0))
+    # Target-level loudness + limiter live in aec._apply_level_control (WebRTC's
+    # own gain_control1 target/limiter is inert in this binding).
     os.environ["AEC_AGC1_ENABLED"] = "1" if opts.get("agc1") else "0"
     os.environ["AEC_AGC1_TARGET_DBFS"] = str(opts.get("agc1_target", -3.0))
-    os.environ["AEC_AGC1_LIMITER"] = "1"
+    os.environ["AEC_AGC1_MAX_GAIN_DB"] = str(opts.get("agc1_max_gain", 12.0))
+    os.environ["AEC_AGC1_MIN_GAIN_DB"] = str(opts.get("agc1_min_gain", -6.0))
+    os.environ["AEC_LIMITER_ENABLED"] = "1" if opts.get("limiter", True) else "0"
+    os.environ["AEC_LIMITER_CEILING_DBFS"] = str(opts.get("limiter_ceiling", -1.0))
     os.environ["AEC_PRE_GAIN"] = str(opts.get("pre_gain", 1.0))
 
     out = x
     if opts.get("aec", True):
-        far = None
-        if opts.get("far_file"):
-            try:
-                far, _ = load_wav(REC_DIR / str(opts["far_file"]))
-            except Exception:
-                far = None
         aec = AecEngine(near_rate=sr, far_rate=sr,
                         delay_ms=int(opts.get("delay_ms", 60)),
                         enable_preprocess=bool(opts.get("ns", True)))
         try:
-            if far is not None and len(far):
+            if has_far:
                 aec.feed_far(far)
-            out = aec.process_near(x)
+            # Feed in blocks like the live capture path. Gain/limiter state is
+            # per block and slewed, so pushing the whole clip in one call would
+            # apply a single gain step and make the level sliders look inert.
+            # 1600 = 100ms = 10 APM frames (160 samples each): an exact multiple
+            # so no zero-padding is needed (padding corrupts the NS noise model).
+            out = np.empty_like(x)
+            step = int(opts.get("block", 1600))
+            for off in range(0, len(x), step):
+                seg = x[off: off + step]
+                out[off: off + step] = aec.process_near(seg)
         finally:
             aec.close()
 
@@ -261,7 +317,7 @@ if HAS_MULTIPART:
         try:
             load_wav(REC_DIR / fname)
         except Exception as e:
-            return JSONResponse({"error": f"not a readable wav: {e}"}, status_code=400)
+            return JSONResponse({"error": f"not a readable audio file: {e}"}, status_code=400)
         return {"file": fname}
 
 

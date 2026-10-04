@@ -45,9 +45,13 @@ voice_processing/kokoro_tts/*.bin
 voice_processing/agent_assets/models/asr/
 voice_processing/agent_assets/models/asr_whisper/
 voice_processing/agent_assets/models/faster_whisper/
+# faster-whisper CTranslate2 weights (~3 GB, đóng kèm bundle Jetson cho offline)
+voice_processing/agent_assets/models/faster-whisper-large-v3/
 voice_processing/agent_assets/models/whisper/
 voice_processing/agent_assets/models/tts/
 voice_processing/agent_assets/models/kws/*.onnx
+# release archives sinh ra ngoài (đóng gói F: / GitHub release)
+release-*.zip
 voice_processing/checkpoints/
 /checkpoints/
 voice_processing/tools/audio_lab/recordings/

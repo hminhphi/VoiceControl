@@ -223,9 +223,8 @@ services:
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
-      # Execution providers: cuda = GPU nếu có, tự fallback cpu nếu không
-      # (image voice đã restore onnxruntime-gpu -> CUDA EP có thật)
-      - ONNX_PROVIDER=${ONNX_PROVIDER:-cuda}
+      # Execution providers: tên EP đúng danh của onnxruntime (KHÔNG phải "cuda")
+      - ONNX_PROVIDER=${ONNX_PROVIDER:-CUDAExecutionProvider}
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}
       - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
@@ -240,9 +239,16 @@ services:
       - SPEAKER_TSE_ENABLED=${SPEAKER_TSE_ENABLED:-0}
       - TSE_MODEL=${TSE_MODEL:-MossFormer2_SS_16K}
       - TSE_REF_SEC=${TSE_REF_SEC:-1.5}
-      # STT — Whisper GPU (Jetson: TensorRT), ĐỒNG NHẤT với x86
+      # STT — Whisper GPU. faster_whisper = CTranslate2 CUDA (nhanh + chính xác),
+      # `whisper` = auto: TensorRT → faster-whisper → sherpa (whisper_trt không hỗ trợ large-v3)
       - STT_BACKEND=${STT_BACKEND:-whisper}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
+      # faster-whisper (CTranslate2 CUDA) — đọc weights CT2 local nếu có,
+      # nếu để trống thì lấy WHISPER_MODEL (tải từ HuggingFace lần đầu)
+      - FASTER_WHISPER_MODEL=${FASTER_WHISPER_MODEL:-}
+      - FASTER_WHISPER_DEVICE=${FASTER_WHISPER_DEVICE:-cuda}
+      - FASTER_WHISPER_COMPUTE=${FASTER_WHISPER_COMPUTE:-float16}
+      - FASTER_WHISPER_BEAM=${FASTER_WHISPER_BEAM:-5}
       # Nguồn .pt local để build TensorRT engine (fetch_assets whisper-pt)
       - WHISPER_BASE_MODEL_PATH=${WHISPER_BASE_MODEL_PATH:-/app/agent_assets/models/whisper/large-v3.pt}
       - STT_LANGUAGE=${STT_LANGUAGE:-auto}
@@ -261,10 +267,17 @@ services:
       - AEC_ENABLED=${AEC_ENABLED:-1}
       - AEC_DELAY_MS=${AEC_DELAY_MS:-60}
       - AEC_NOISE_SUPPRESS=${AEC_NOISE_SUPPRESS:-1}
-      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-high}
-      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-1}
+      - AEC_NS_LEVEL=${AEC_NS_LEVEL:-low}
+      - AEC_NS_LINEAR=${AEC_NS_LINEAR:-1}
+      - AEC_HPF_FULL_BAND=${AEC_HPF_FULL_BAND:-0}
+      - AEC_TRANSIENT_SUPPRESS=${AEC_TRANSIENT_SUPPRESS:-0}
+      # Limiter đầu ra: AGC chỉ tăng gain nên không có limiter thì peak bị cắt cứng
+      # (tiếng "tách tách"). Soft knee, trần -3 dBFS.
+      - AEC_LIMITER_ENABLED=${AEC_LIMITER_ENABLED:-1}
+      - AEC_LIMITER_CEILING_DBFS=${AEC_LIMITER_CEILING_DBFS:--3.0}
+      - AEC_LIMITER_KNEE=${AEC_LIMITER_KNEE:-0.7}
       # AGC2 adaptive digital + pre-amp (weak mics)
-      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-1}
+      - AEC_AGC_ENABLED=${AEC_AGC_ENABLED:-0}
       - AEC_AGC_HEADROOM_DB=${AEC_AGC_HEADROOM_DB:-5.0}
       - AEC_AGC_MAX_GAIN_DB=${AEC_AGC_MAX_GAIN_DB:-30.0}
       - AEC_AGC_INITIAL_GAIN_DB=${AEC_AGC_INITIAL_GAIN_DB:-15.0}
