@@ -80,17 +80,31 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
         librosa
 
 # faster-whisper (CTranslate2) — GPU Whisper large-v3 with highest accuracy.
-# Same install shape as Dockerfile.x86: --no-deps so it does NOT pull the CPU
-# onnxruntime and break the force-installed onnxruntime-gpu below; runtime deps
-# are installed explicitly. Needs network (PyPI) at build time.
+# --no-deps so it does NOT pull the CPU onnxruntime and break the
+# force-installed onnxruntime-gpu below; runtime deps are installed explicitly.
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --no-deps "faster-whisper>=1.1.0" \
     && python3 -m pip install \
-        "ctranslate2>=4.5.0" \
         huggingface_hub \
         tokenizers \
         av \
         tqdm
+
+# CTranslate2 WITH CUDA, built from source for this exact platform.
+# The PyPI aarch64 wheel is CPU-only (verified: libctranslate2 links no CUDA
+# library at all), which made faster-whisper silently fall back to CPU/int8 on
+# Jetson. This is 4.8.2 built with -DWITH_CUDA=ON -DWITH_CUDNN=ON
+# -DCUDA_ARCH_LIST=8.7 (AGX Orin). libctranslate2.so.4.8.2 ships next to the
+# wheel and goes to /usr/local/lib, which the extension already rpaths into.
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    cp /tmp/wheels/libctranslate2.so.4.8.2 /usr/local/lib/ \
+    && ln -sf libctranslate2.so.4.8.2 /usr/local/lib/libctranslate2.so.4 \
+    && ln -sf libctranslate2.so.4 /usr/local/lib/libctranslate2.so \
+    && ldconfig \
+    && python3 -m pip install --no-deps \
+        /tmp/wheels/ctranslate2-4.8.2-cp310-cp310-linux_aarch64.whl \
+    && python3 -c "import ctranslate2; assert hasattr(ctranslate2, 'get_cuda_device_count')" \
+    && ldd /usr/local/lib/libctranslate2.so.4.8.2 | grep -q cublas
 
 # ── 6. TTS (Kokoro ONNX) ──────────────────────────────────────
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
