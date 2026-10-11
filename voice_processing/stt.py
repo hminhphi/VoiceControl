@@ -4,6 +4,7 @@ import io
 import json
 import wave
 import base64
+from collections import Counter
 import numpy as np
 from urllib.parse import urlencode
 from pydub import AudioSegment
@@ -115,6 +116,59 @@ def _env_bool(name, default=False):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_float(name, default):
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return float(default)
+    try:
+        return float(value)
+    except ValueError:
+        return float(default)
+
+
+def _env_int(name, default):
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return int(default)
+    try:
+        return int(value)
+    except ValueError:
+        return int(default)
+
+
+def _collapse_repeats(text, ngram_max=10):
+    """Collapse consecutive n-gram repetitions (1..ngram_max words) to one.
+
+    Reference: godxxy1229/whisper-hallucination-remover. Legit long phrases
+    (period > ngram_max tokens) are left untouched, so a user repeating a
+    sentence stays intact.
+    """
+    for n in range(1, max(1, ngram_max) + 1):
+        pattern = r"((?:[^\s]+(?:\s+[^\s]+){%d}\s*)\s*)\1{2,}" % (n - 1)
+        text = re.sub(pattern, r"\1", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _collapse_or_drop_repetition(text):
+    """Collapse repetition loops; drop when the collapse removes most tokens.
+
+    Returns (kept_text, None) or (None, reason). Runaway loops like
+    "I'm going to make sure that" x33 collapse from 191 to 6 tokens (97% of
+    the text) and are dropped; "mở cửa mở cửa mở cửa" (6 tokens) is kept
+    collapsed because there is too little text to judge.
+    """
+    collapsed = _collapse_repeats(text, _env_int("FW_REP_NGRAM_MAX", 10))
+    if collapsed == text:
+        return text, None
+    orig_n = len(text.split())
+    col_n = len(collapsed.split())
+    min_tokens = _env_int("FW_REP_MIN_TOKENS", 8)
+    max_saving = _env_float("FW_REP_MAX_SAVING", 0.7)
+    if orig_n >= min_tokens and orig_n > 0 and (orig_n - col_n) / orig_n >= max_saving:
+        return None, f"rep={orig_n}->{col_n}"
+    return collapsed, None
+
+
 def _sherpa_provider() -> str:
     """Execution provider for sherpa-onnx: cpu | cuda.
 
@@ -155,7 +209,39 @@ _HALLUCINATION_TEXTS = {
     "you", "bye", "bye bye", "goodbye", "hello", "hi", "ha", "haha", "wow", "huh",
     "phone beeps", "beep", "beeps", "applause", "music", "silence",
     "subtitle", "subtitles", "subs",
+    # Observed on the 96-clip noise corpus (faster-whisper large-v3-turbo,
+    # 2026-10-06): short junk that survives the language gate (mostly EN with
+    # high language_probability) plus common exotic-language fillers.
+    "take it out", "and it's going", "all right",
+    "i don't call it my instrument",
+    "we'll be right back", "i'll be right back", "we'll see you next week",
+    "i'm going to show you a little bit",
+    "obrigado", "gracias", "gracias por ver el video", "qué masita",
+    "qué masita que masita", "selamat menikmati", "それではまた",
+    "það er í þeim", "nú kom hópi, spesirðu orðið", "umtækka við fyrir bak",
+    "this is back",
+    # 2026-10-06 follow-up session: junk that passed the relaxed lp gate.
+    "let me do this", "me this", "it's okay", "hey dora",
+    "hey dóla", "hei góla", "hey dola", "hei gola",
+    "það er það í þeir", "hún kom hópið speisaðu orðið", "vælkom", "m-g-g",
 }
+# Marker substrings cua hallucination da ngon ngu (Whisper hay "bịa" cau ket
+# thuc video khi gap nhieu/nhac). Khop substring vi ban dich rat khac nhau.
+_HALLUCINATION_MARKERS = (
+    "đăng ký kênh", "dang ky kenh", "thích và đăng ký", "nhận thông tin mới nhất",
+    "cảm ơn các bạn đã xem", "cảm ơn bạn đã xem",
+    "subscribe", "like and subscribe",
+    "ご視聴", "チャンネル登録", "ご覧いただき",
+    # Video outro/credit phrases observed in practice (turbo + large-v3 and
+    # PhoWhisper VI endings). Substring match keeps them out of any language.
+    "hẹn gặp lại", "hẹn gặp lại các bạn", "cảm ơn đã theo dõi", "ủng hộ kênh",
+    "đăng ký và chia sẻ", "thông tin tiếp theo", "chào tạm biệt",
+    "thanks for watching", "thank you for watching", "please like and subscribe",
+    "teksting av", "subtitles by", "subtitle by", "amara.org",
+    "субтитры", "спасибо за просмотр",
+    "ご覧いただきありがとう", "チャンネル登録お願い",
+    "suscríbete", "suscribete",
+)
 _DROP_SHORT_HALLUCINATIONS = _env_bool("STT_DROP_SHORT_HALLUCINATIONS", True)
 
 
@@ -164,18 +250,27 @@ def _strip_hallucination(text: str) -> str:
     t = (text or "").strip()
     if not t:
         return ""
-    core = t.strip(" \t\r\n.!?,…。！？\"'").lower()
+    core = t.strip(" \t\r\n.!?,…。！？\"'¡¿").lower()
     if not core:
         return ""
     if core[0] in "([{" and core[-1] in ")]}":  # bracketed-only, e.g. "(phone beeps)"
         return ""
     if _DROP_SHORT_HALLUCINATIONS:
+        if any(m in core for m in _HALLUCINATION_MARKERS):
+            return ""
         extra = {
             w.strip().lower()
             for w in os.environ.get("STT_HALLUCINATION_BLOCKLIST", "").split(",")
             if w.strip()
         }
-        if core in _HALLUCINATION_TEXTS or core in extra:
+        # Comma-flattened key so "Hei, Góla." matches the "hei góla" entry.
+        core_key = " ".join(core.replace(",", " ").split())
+        if (
+            core in _HALLUCINATION_TEXTS
+            or core_key in _HALLUCINATION_TEXTS
+            or core in extra
+            or core_key in extra
+        ):
             return ""
     return t
 
@@ -849,43 +944,163 @@ class FasterWhisperBackend:
                 raise
         print("[STT] faster-whisper ready", flush=True)
 
+    def _drop_result(self, samples, rms, peak, reason):
+        print(
+            f"[STT] dropped segment ({reason}) samples={len(samples)} "
+            f"rms={rms:.5f} peak={peak:.5f}",
+            flush=True,
+        )
+        return {
+            "text": "",
+            "language": None,
+            "raw_text": "",
+            "forced_language": self.language or None,
+            "generated_language": None,
+            "sample_count": len(samples),
+            "rms": rms,
+            "peak": peak,
+            "drop_reason": reason,
+        }
+
     def transcribe(self, audio_int16):
         samples = resample_audio(audio_int16, self.device_sample_rate, STT_SAMPLE_RATE)
         rms, peak = _audio_metrics(samples)
 
-        no_speech_threshold = float(os.environ.get("FW_NO_SPEECH_THRESHOLD", "0.6"))
+        # ── L0: audio-side gates (before any model work) ──────────────
+        # VAD blips and near-silence reach STT occasionally. Whisper (esp.
+        # large-v3-turbo, which reports no_speech_prob=0.0 on everything)
+        # hallucinates on such input, so drop early and cheaply instead.
+        # FW_MIN_RMS=0.012 sits below the quietest real command measured
+        # (rms 0.0219) and above most junk (0.0001-0.015); same approach as
+        # screenpipe's MIN_RMS_ENERGY=0.015.
+        duration_ms = len(samples) / STT_SAMPLE_RATE * 1000.0
+        if duration_ms < _env_float("STT_MIN_AUDIO_MS", 300.0):
+            return self._drop_result(samples, rms, peak, f"short={duration_ms / 1000:.2f}s")
+        min_rms = _env_float("FW_MIN_RMS", 0.012)
+        if rms < min_rms:
+            return self._drop_result(samples, rms, peak, f"rms={rms:.4f}")
+
+        # faster-whisper da tu ap dung no_speech_threshold noi bo (chi skip khi
+        # no_speech cao VA avg_logprob thap). Loc lai lan 2 o day tung loai oan
+        # tieng Viet/Nhat: vd segment "Mở cửa bên trái" co raw=vi prob=0.89
+        # nhung no_speech=0.67 -> bi bo. Vi audio da qua VAD cua pipeline, mac
+        # dinh 1.0 = tat han filter nay (van giu env de chinh khi can).
+        no_speech_threshold = float(os.environ.get("FW_NO_SPEECH_THRESHOLD", "1.0"))
         log_prob_threshold = float(os.environ.get("FW_LOG_PROB_THRESHOLD", "-1.0"))
         min_avg_logprob = float(os.environ.get("FW_MIN_AVG_LOGPROB", "-1.0"))
+        max_compression = _env_float("FW_MAX_COMPRESSION", 8.0)
 
-        segments, info = self.model.transcribe(
-            samples,
-            language=self.language or None,
-            beam_size=self.beam_size,
-            vad_filter=True,
-            condition_on_previous_text=False,
-            no_speech_threshold=no_speech_threshold,
-            log_prob_threshold=log_prob_threshold,
-            compression_ratio_threshold=2.4,
-            temperature=0.0,
-        )
-        texts = []
-        for seg in segments:
-            if getattr(seg, "no_speech_prob", 0.0) > no_speech_threshold:
-                continue
-            if getattr(seg, "avg_logprob", 0.0) < min_avg_logprob:
-                continue
-            part = _strip_hallucination(seg.text)
-            if part:
-                texts.append(part)
-        text = " ".join(texts).strip()
+        def _run(vad_enabled: bool):
+            segs, inf = self.model.transcribe(
+                samples,
+                language=self.language or None,
+                beam_size=self.beam_size,
+                vad_filter=vad_enabled,
+                condition_on_previous_text=False,
+                no_speech_threshold=no_speech_threshold,
+                log_prob_threshold=log_prob_threshold,
+                compression_ratio_threshold=2.4,
+                temperature=0.0,
+            )
+            kept, dropped, n_segs = [], [], 0
+            for seg in segs:
+                n_segs += 1
+                if getattr(seg, "no_speech_prob", 0.0) > no_speech_threshold:
+                    dropped.append(f"no_speech={seg.no_speech_prob:.2f}")
+                    continue
+                if getattr(seg, "avg_logprob", 0.0) < min_avg_logprob:
+                    dropped.append(f"logprob={seg.avg_logprob:.2f}")
+                    continue
+                # L2a: runaway looping shows up as an extreme compression ratio.
+                # Threshold 8.0: legit repetitive commands measure cr 3.5-3.6
+                # ("open the ... open the ...") while the observed junk loop was 19.8.
+                comp = getattr(seg, "compression_ratio", 0.0) or 0.0
+                if max_compression > 0 and comp > max_compression:
+                    dropped.append(f"cr={comp:.1f}")
+                    continue
+                part = _strip_hallucination(seg.text)
+                if not part:
+                    dropped.append(f"halluc={seg.text.strip()[:24]!r}")
+                    continue
+                # L2b: text-side repetition (collapse; drop only heavy loops).
+                part, rep_reason = _collapse_or_drop_repetition(part)
+                if rep_reason:
+                    dropped.append(rep_reason)
+                    continue
+                kept.append(part)
+            return " ".join(kept).strip(), inf, n_segs, dropped
+
+        text, info, n_segs, dropped = _run(vad_enabled=True)
+        if not text:
+            # Doan audio nay da qua VAD cua chinh pipeline. VAD noi bo cua
+            # faster-whisper (hoac nguong no_speech) doi khi loai sach tieng noi
+            # ngan / giong co dau -> transcript rong. Thu lai KHONG VAD truoc khi
+            # bo qua, kem ly do bi loai de con chan doan.
+            print(
+                f"[STT] empty result (segs={n_segs} dropped={dropped[:3]})"
+                f"; retry with vad_filter=False",
+                flush=True,
+            )
+            text2, info2, n2, dropped2 = _run(vad_enabled=False)
+            if text2:
+                text, info, n_segs, dropped = text2, info2, n2, dropped2
+            else:
+                print(
+                    f"[STT] still empty (segs={n2} dropped={dropped2[:3]})",
+                    flush=True,
+                )
         raw_lang = getattr(info, "language", None)
-        lang = _resolve_lang(text, raw_lang)
         prob = getattr(info, "language_probability", None)
+        drop_reason = None
+        if not text and dropped and drop_reason is None:
+            # Surface why the segment was dropped (cr=..., rep=..., halluc=...)
+            # so main.py can log it and operators can tune thresholds.
+            drop_reason = dropped[0]
 
+        # ── L3: language gate ─────────────────────────────────────────
+        # Turbo hallucinates in random languages (is/pt/es/zh/id/...) and its
+        # language_probability on junk is low. But short/quiet REAL speech is
+        # also mis-detected (ko/is) with low lp (measured 2026-10-06: a real
+        # "What time is it?" came back as ko/0.44), so:
+        #   - whitelist the reported language, with a fallback to the
+        #     transcript's script when the model mis-detects;
+        #   - FW_LANG_MIN_PROB default lowered 0.6 -> 0.4 to keep short
+        #     commands; junk that slips through is handled by the blocklist.
+        # Only active when language is auto-detected; a forced STT_LANGUAGE
+        # means the operator wants that language regardless.
+        if text and not self.language and _env_bool("FW_DROP_FOREIGN_LANG", True):
+            allowed = {
+                s.strip().lower()
+                for s in os.environ.get("FW_ALLOWED_LANGS", "vi,ja,en").split(",")
+                if s.strip()
+            }
+            raw_code = (
+                str(raw_lang).strip().lower().replace("_", "-").split("-")[0]
+                if raw_lang
+                else ""
+            )
+            min_prob = _env_float("FW_LANG_MIN_PROB", 0.4)
+            prob_ok = prob is None or float(prob) >= min_prob
+            # Script-based language of the transcript itself (detect_lang), NOT
+            # _resolve_lang: the latter accepts ko/zh from SUPPORTED_LANGS.
+            script_lang = detect_lang(text)
+            if raw_code and raw_code not in allowed and not (
+                script_lang in allowed and prob_ok
+            ):
+                drop_reason = f"lang={raw_code}"
+            elif not prob_ok and prob is not None:
+                drop_reason = f"lp={float(prob):.2f}"
+            if drop_reason:
+                print(f"[STT] dropped segment ({drop_reason}): {text!r}", flush=True)
+                text = ""
+
+        lang = _resolve_lang(text, raw_lang)
         print(
             f"[STT][debug] backend=faster_whisper samples={len(samples)} "
             f"rms={rms:.5f} peak={peak:.5f} lang={lang} raw={raw_lang} prob={prob} "
-            f"kept={len(texts)}"
+            f"segs={n_segs} kept={1 if text else 0}"
+            + (f" dropped={dropped[:3]}" if not text else "")
+            + (f" reason={drop_reason}" if drop_reason else "")
         )
         try:
             print(f"[STT][debug] text={text!r}")
@@ -900,6 +1115,7 @@ class FasterWhisperBackend:
             "sample_count": len(samples),
             "rms": rms,
             "peak": peak,
+            "drop_reason": drop_reason,
         }
 
 

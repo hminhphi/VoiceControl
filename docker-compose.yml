@@ -48,7 +48,9 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-}
       - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
-      - ORCHESTRATOR_ROUTING_MODEL=${ORCHESTRATOR_ROUTING_MODEL:-}
+      # chat = /v1/chat/completions (llama.cpp tren Jetson); responses =
+      # /v1/responses (server x86, tool format phang, reasoning tach rieng)
+      - LLM_API=${LLM_API:-chat}
       - GRAPHQL_HOST=${GRAPHQL_HOST:-}
       - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
       - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
@@ -223,10 +225,22 @@ services:
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-http://localhost:8000}
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
+      # TTS Supertonic-3 (ONNX) thay Kokoro + Piper. Model nam trong agent_assets
+      # (mount runtime), giong chon theo ngon ngu: en=F1, ja=F1, vi=F3.
+      - SUPERTONIC_MODEL_DIR=${SUPERTONIC_MODEL_DIR:-/app/agent_assets/models/supertonic-3}
+      - SUPERTONIC_MODEL=${SUPERTONIC_MODEL:-supertonic-3}
+      - SUPERTONIC_STEPS=${SUPERTONIC_STEPS:-8}
+      - SUPERTONIC_SPEED=${SUPERTONIC_SPEED:-1.05}
+      - TTS_TRIM_SILENCE=${TTS_TRIM_SILENCE:-1}
+      - TTS_VOICE_EN=${TTS_VOICE_EN:-F1}
+      - TTS_VOICE_JA=${TTS_VOICE_JA:-F1}
+      - TTS_VOICE_VI=${TTS_VOICE_VI:-F3}
       # Execution providers: tên EP đúng danh của onnxruntime (KHÔNG phải "cuda")
       - ONNX_PROVIDER=${ONNX_PROVIDER:-CUDAExecutionProvider}
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}
-      - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
+      # VAD: CPU (model ~2MB). CUDA chỉ thêm overhead + phụ thuộc GPU đang chạy
+      # LLM -> audio thread bị stall (bài học x86 2026-10-06).
+      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
       - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
       - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}
@@ -252,6 +266,16 @@ services:
       # Nguồn .pt local để build TensorRT engine (fetch_assets whisper-pt)
       - WHISPER_BASE_MODEL_PATH=${WHISPER_BASE_MODEL_PATH:-/app/agent_assets/models/whisper/large-v3.pt}
       - STT_LANGUAGE=${STT_LANGUAGE:-auto}
+      # Chống hallucination faster-whisper (L0-L4) — xem voice_processing/stt.py
+      - STT_MIN_AUDIO_MS=${STT_MIN_AUDIO_MS:-300}
+      - FW_MIN_RMS=${FW_MIN_RMS:-0.012}
+      - FW_MAX_COMPRESSION=${FW_MAX_COMPRESSION:-8.0}
+      - FW_REP_NGRAM_MAX=${FW_REP_NGRAM_MAX:-10}
+      - FW_REP_MIN_TOKENS=${FW_REP_MIN_TOKENS:-8}
+      - FW_REP_MAX_SAVING=${FW_REP_MAX_SAVING:-0.7}
+      - FW_DROP_FOREIGN_LANG=${FW_DROP_FOREIGN_LANG:-1}
+      - FW_ALLOWED_LANGS=${FW_ALLOWED_LANGS:-vi,ja,en}
+      - FW_LANG_MIN_PROB=${FW_LANG_MIN_PROB:-0.4}
       # fallback: sherpa-onnx Whisper (models ship in the bundle)
       - STT_WHISPER_DIR=${STT_WHISPER_DIR:-/app/agent_assets/models/asr_whisper}
       - STT_WHISPER_MODEL=${STT_WHISPER_MODEL:-small}
@@ -288,6 +312,8 @@ services:
       - VAD_THRESHOLD_HIGH=${VAD_THRESHOLD_HIGH:-0.55}
       - VAD_THRESHOLD_LOW=${VAD_THRESHOLD_LOW:-0.20}
       - VAD_DETECT_THRESHOLD=${VAD_DETECT_THRESHOLD:-0.55}
+      # Số frame liên tiếp (32ms/frame) đủ để bắt đầu speech (3 = 96ms)
+      - VAD_WINDOW_SIZE=${VAD_WINDOW_SIZE:-3}
       - VAD_FIRST_TIMEOUT=${VAD_FIRST_TIMEOUT:-8.0}
       - SEGMENT_SILENCE=${SEGMENT_SILENCE:-1.0}
       - TURN_END_SILENCE=${TURN_END_SILENCE:-2.5}

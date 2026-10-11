@@ -57,8 +57,10 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:8080/v1}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-google/gemma-4-e2b}
-      - ORCHESTRATOR_ROUTING_MODEL=${ORCHESTRATOR_ROUTING_MODEL:-}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-qwen3.5-4b}
+      # x86 server: Responses API (/v1/responses) — tool format phang, reasoning
+      # tach rieng khoi message. Doi lai "chat" neu chay llama.cpp.
+      - LLM_API=${LLM_API:-responses}
       - GRAPHQL_HOST=${GRAPHQL_HOST:-}
       - GRAPHQL_API_KEY=${GRAPHQL_API_KEY:-}
       - GRAPHQL_VEHICLE_ID=${GRAPHQL_VEHICLE_ID:-}
@@ -182,13 +184,22 @@ services:
       - TTS_CHUNK_COUNT=${TTS_CHUNK_COUNT:-5}
       # Empty = speak the language detected per turn (en/ja/vi)
       - TTS_LANGUAGE=${TTS_LANGUAGE:-}
-      # Vietnamese TTS (sherpa-onnx Piper)
+      # TTS Supertonic-3 (ONNX) — thay Kokoro + Piper
+      - SUPERTONIC_MODEL_DIR=${SUPERTONIC_MODEL_DIR:-/app/agent_assets/models/supertonic-3}
+      - SUPERTONIC_MODEL=${SUPERTONIC_MODEL:-supertonic-3}
+      - SUPERTONIC_STEPS=${SUPERTONIC_STEPS:-8}
+      - SUPERTONIC_SPEED=${SUPERTONIC_SPEED:-1.05}
+      - TTS_TRIM_SILENCE=${TTS_TRIM_SILENCE:-1}
+      - TTS_VOICE_EN=${TTS_VOICE_EN:-F1}
+      - TTS_VOICE_JA=${TTS_VOICE_JA:-F1}
+      - TTS_VOICE_VI=${TTS_VOICE_VI:-F3}
+      # Vietnamese TTS cu (sherpa-onnx Piper) - chi con cho kokoro_tts, khong dung
       - PIPER_VI_DIR=${PIPER_VI_DIR:-/app/agent_assets/models/tts/vits-piper-vi_VN-vais1000-medium}
       # Execution providers: tên EP đúng danh của onnxruntime (KHÔNG phải "cuda")
       # (Dockerfile.x86 đã restore onnxruntime-gpu -> CUDA EP có thật trong container)
       - ONNX_PROVIDER=${ONNX_PROVIDER:-CUDAExecutionProvider}   # Kokoro TTS / VAD
       - SHERPA_PROVIDER=${SHERPA_PROVIDER:-cpu}   # sherpa ASR + wake word (wheel PyPI = CPU)
-      - VAD_PROVIDER=${VAD_PROVIDER:-cuda}
+      - VAD_PROVIDER=${VAD_PROVIDER:-cpu}
       # Speaker overlap / diarization (opt-in, GPU via torch CUDA)
       - SPEAKER_ENABLED=${SPEAKER_ENABLED:-0}
       - SPEAKER_DEVICE=${SPEAKER_DEVICE:-cuda}
@@ -206,6 +217,16 @@ services:
       - STT_BACKEND=${STT_BACKEND:-whisper}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3}
       - STT_LANGUAGE=${STT_LANGUAGE:-auto}
+      # Chống hallucination faster-whisper (L0-L4) — xem voice_processing/stt.py
+      - STT_MIN_AUDIO_MS=${STT_MIN_AUDIO_MS:-300}
+      - FW_MIN_RMS=${FW_MIN_RMS:-0.012}
+      - FW_MAX_COMPRESSION=${FW_MAX_COMPRESSION:-8.0}
+      - FW_REP_NGRAM_MAX=${FW_REP_NGRAM_MAX:-10}
+      - FW_REP_MIN_TOKENS=${FW_REP_MIN_TOKENS:-8}
+      - FW_REP_MAX_SAVING=${FW_REP_MAX_SAVING:-0.7}
+      - FW_DROP_FOREIGN_LANG=${FW_DROP_FOREIGN_LANG:-1}
+      - FW_ALLOWED_LANGS=${FW_ALLOWED_LANGS:-vi,ja,en}
+      - FW_LANG_MIN_PROB=${FW_LANG_MIN_PROB:-0.4}
       # faster-whisper (GPU) — CTranslate2 CUDA, giống hệt Jetson
       # FASTER_WHISPER_MODEL trỏ thư mục CT2 local (đã có trong bundle ở
       # /app/agent_assets/models/...); để trống thì dùng WHISPER_MODEL
@@ -252,6 +273,8 @@ services:
       - TURN_END_SILENCE=${TURN_END_SILENCE:-2.5}
       - VAD_FIRST_TIMEOUT=${VAD_FIRST_TIMEOUT:-8.0}
       - VAD_DETECT_THRESHOLD=${VAD_DETECT_THRESHOLD:-0.55}
+      # Số frame liên tiếp (32ms/frame) đủ để bắt đầu speech (3 = 96ms)
+      - VAD_WINDOW_SIZE=${VAD_WINDOW_SIZE:-3}
       # Follow-up không cần wake-word sau khi TTS trả lời
       - FOLLOWUP_LISTEN_SEC=${FOLLOWUP_LISTEN_SEC:-12.0}
       - FOLLOWUP_GRACE_SEC=${FOLLOWUP_GRACE_SEC:-0.2}
@@ -328,8 +351,14 @@ services:
       - CAR_CONTROL_URL=http://car_control:8001
       - ORCHESTRATOR_URL=http://orchestrator:8000
       - CAR_CONTROL_UI_PORT=8010
+      # Panel Voice Lab doc/ghi file nay (mount ben duoi)
+      - ENV_FILE=/app/.env
+      # URL browser-facing; de trong = suy ra tu host cua request
+      - ORCHESTRATOR_PUBLIC_URL=${ORCHESTRATOR_PUBLIC_URL:-}
     volumes:
       - ./car_control_ui:/app
+      # .env that cua repo -> panel Voice Lab ghi truc tiep
+      - ./.env:/app/.env
     depends_on:
       car_control:
         condition: service_healthy

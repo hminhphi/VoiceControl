@@ -4,7 +4,6 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 from typing import List, Dict
 
-from api.route_orchestrator import orchestrator_router
 from api.route_orchestrator import registry
 
 
@@ -101,8 +100,6 @@ async def add_agent(req: AddAgentRequest):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Could not fetch agent card from {url}",
         )
-    
-    orchestrator_router.reload_agents()
 
     return entry
 
@@ -120,7 +117,5 @@ async def remove_agent(agent_id: str):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Agent {agent_id} not found",
         )
-
-    orchestrator_router.reload_agents()
 
     return {"status": "removed", "agent_id": agent_id}

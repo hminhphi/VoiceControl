@@ -23,7 +23,11 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(_ROOT, "agent_assets", "models", "silero_vad.onnx")
 MODEL_CHUNK = 512       # silero v5 chunk size at 16 kHz
 VAD_SAMPLE_RATE = 16000
-_WINDOW_SIZE = 3        # frames in sliding window before triggering
+# Consecutive voiced frames required before is_speech() is true (default).
+# 3 frames = 96 ms: still rejects single-frame clicks/pops, while short
+# commands ("OK", "Do it") trigger without the 192 ms delay that dropped them
+# (2026-10-06).
+_WINDOW_SIZE = 3
 
 
 class VADProcessor:
@@ -43,7 +47,10 @@ class VADProcessor:
 
         self.device_sample_rate = device_sample_rate
 
-        # Threshold from env or defaults
+        # Threshold from env or defaults. Measured 2026-10-06: lowering to
+        # 0.45/0.50 re-admits the 30 ms click artifact (window 3), so the
+        # threshold stays 0.55/0.20 and short commands are handled by the
+        # halved window (96 ms) + STT-side fixes instead.
         self._threshold_high = float(os.environ.get("VAD_THRESHOLD_HIGH", "0.55"))
         self._threshold_low = float(os.environ.get("VAD_THRESHOLD_LOW", "0.20"))
         # Consecutive speech frames required to trigger (higher = less noise).
@@ -163,6 +170,20 @@ class VADProcessor:
     def is_speech(self) -> bool:
         """Return True if sliding window majority is voice."""
         return self._window.count(True) >= self._window_size
+
+    def process_all(self) -> list[float]:
+        """Process every complete 512-sample frame currently buffered.
+
+        main.py feeds 1024-sample chunks (64 ms at 16 kHz) but each
+        ``get_prob()`` call consumes only one 512-sample frame (32 ms).
+        Calling ``get_prob()`` once per chunk made the VAD run at half
+        real-time with an ever-growing buffer (discovered 2026-10-06).
+        Returns the probabilities of the frames processed in this call.
+        """
+        probs = []
+        while len(self.buffer) >= MODEL_CHUNK:
+            probs.append(self.get_prob())
+        return probs
 
     def empty_buffer(self) -> None:
         """Reset buffer and internal state (after wake word detection)."""

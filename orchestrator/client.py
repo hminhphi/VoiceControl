@@ -34,29 +34,6 @@ async def _get_agent_card(httpx_client: httpx.AsyncClient, url: str):
 
 
 @timeit
-async def send_to_agents_parallel(
-    agent_ids: list,
-    user_message: str,
-    context: PerAgentContext,
-    session_id: str,
-    registry: AgentRegistry,
-):
-    # prepare all coroutines
-    coros = [
-        send_to_agent(agent_id, user_message, context, session_id, registry)
-        for agent_id in agent_ids
-    ]
-    # execute all in parallel
-    results = await asyncio.gather(*coros, return_exceptions=True)
-    # Optionally handle exceptions here:
-    processed_results = []
-    for agent_id, result in zip(agent_ids, results):
-        if isinstance(result, Exception):
-            logger.error(f"Agent {agent_id} failed: {result}")
-            processed_results.append({"agent_id": agent_id, "error": str(result)})
-        else:
-            processed_results.append(result)
-    return processed_results
 
 
 @timeit

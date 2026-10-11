@@ -457,6 +457,58 @@
       </div>
     </div>
 
+    <!-- Voice Lab: tien xu ly am thanh (AEC/NS/AGC/Limiter) ghi vao .env -->
+    <div class="card">
+      <h3>Voice Lab - AEC / NS / AGC / Limiter</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
+        <label>NS level
+          <select id="vc_ns_level" style="width:100%;margin-top:2px">
+            <option value="low">low</option>
+            <option value="moderate">moderate</option>
+            <option value="high">high</option>
+            <option value="very_high">very_high</option>
+          </select>
+        </label>
+        <label>Limiter ceiling (dBFS)
+          <input id="vc_ceiling" type="number" step="0.5" value="-3.0" style="width:100%;margin-top:2px">
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_ns_linear" type="checkbox"> NS linear-AEC
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_hpf" type="checkbox"> High-pass (full band)
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_transient" type="checkbox"> Transient suppress
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_agc2" type="checkbox"> AGC2 (adaptive)
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_limiter" type="checkbox"> Limiter (soft knee)
+        </label>
+        <label>Limiter knee (0-1)
+          <input id="vc_knee" type="number" step="0.05" min="0" max="1" value="0.7" style="width:100%;margin-top:2px">
+        </label>
+        <label style="display:flex;gap:6px;align-items:center">
+          <input id="vc_agc1" type="checkbox"> AGC1 (target-level)
+        </label>
+        <label>AGC1 target (dBFS)
+          <input id="vc_agc1_target" type="number" step="1" value="-3" style="width:100%;margin-top:2px">
+        </label>
+        <label>AEC delay (ms)
+          <input id="vc_delay" type="number" step="5" value="60" style="width:100%;margin-top:2px">
+        </label>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:10px;align-items:center">
+        <button class="chat-send" onclick="saveVoiceConfig()">Luu vao .env</button>
+        <span id="vc_status" style="font-size:12px;color:#9db0cc"></span>
+      </div>
+      <div style="font-size:11px;color:#9db0cc;margin-top:4px">
+        Ghi vao .env; ap dung sau khi restart voice_processing (run_all_pc.ps1 -Down roi -Docker).
+      </div>
+    </div>
+
     <!-- Log -->
     <div class="card">
       <h3>📋 Event Log</h3>
@@ -468,6 +520,64 @@
 <script>
 const CAR_URL  = "{{ car_control_url }}";
 const ORCH_URL = "{{ orchestrator_url }}";
+
+// ── Voice Lab: doc/ghi config tien xu ly trong .env ──────────────
+const VC_BOOL = ['AEC_NS_LINEAR','AEC_HPF_FULL_BAND','AEC_TRANSIENT_SUPPRESS',
+                 'AEC_AGC_ENABLED','AEC_LIMITER_ENABLED','AEC_AGC1_ENABLED'];
+const VC_NUM  = ['AEC_LIMITER_CEILING_DBFS','AEC_LIMITER_KNEE',
+                 'AEC_AGC1_TARGET_DBFS','AEC_DELAY_MS'];
+
+function _vcSet(id, val){ const el = document.getElementById(id); if (el) el.value = val; }
+function _vcChk(id, val){ const el = document.getElementById(id); if (el) el.checked = (String(val) === '1' || String(val).toLowerCase() === 'true'); }
+function _vcVal(id){ const el = document.getElementById(id); return el ? el.value : ''; }
+function _vcOn(id){ const el = document.getElementById(id); return (el && el.checked) ? '1' : '0'; }
+
+async function loadVoiceConfig(){
+  try {
+    const r = await fetch('/api/voice_config');
+    const d = await r.json();
+    if (d.error){ document.getElementById('vc_status').textContent = d.error; return; }
+    _vcSet('vc_ns_level', d.AEC_NS_LEVEL || 'low');
+    _vcSet('vc_ceiling', d.AEC_LIMITER_CEILING_DBFS ?? '-3.0');
+    _vcSet('vc_knee', d.AEC_LIMITER_KNEE ?? '0.7');
+    _vcSet('vc_agc1_target', d.AEC_AGC1_TARGET_DBFS ?? '-3');
+    _vcSet('vc_delay', d.AEC_DELAY_MS ?? '60');
+    _vcChk('vc_ns_linear', d.AEC_NS_LINEAR);
+    _vcChk('vc_hpf', d.AEC_HPF_FULL_BAND);
+    _vcChk('vc_transient', d.AEC_TRANSIENT_SUPPRESS);
+    _vcChk('vc_agc2', d.AEC_AGC_ENABLED);
+    _vcChk('vc_limiter', d.AEC_LIMITER_ENABLED);
+    _vcChk('vc_agc1', d.AEC_AGC1_ENABLED);
+  } catch(e){ document.getElementById('vc_status').textContent = e.message; }
+}
+
+async function saveVoiceConfig(){
+  const body = {
+    AEC_NS_LEVEL: _vcVal('vc_ns_level'),
+    AEC_LIMITER_CEILING_DBFS: _vcVal('vc_ceiling'),
+    AEC_LIMITER_KNEE: _vcVal('vc_knee'),
+    AEC_AGC1_TARGET_DBFS: _vcVal('vc_agc1_target'),
+    AEC_DELAY_MS: _vcVal('vc_delay'),
+    AEC_NS_LINEAR: _vcOn('vc_ns_linear'),
+    AEC_HPF_FULL_BAND: _vcOn('vc_hpf'),
+    AEC_TRANSIENT_SUPPRESS: _vcOn('vc_transient'),
+    AEC_AGC_ENABLED: _vcOn('vc_agc2'),
+    AEC_LIMITER_ENABLED: _vcOn('vc_limiter'),
+    AEC_AGC1_ENABLED: _vcOn('vc_agc1'),
+  };
+  const st = document.getElementById('vc_status');
+  st.textContent = 'dang luu...';
+  try {
+    const r = await fetch('/api/voice_config', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    st.textContent = d.error ? ('loi: ' + d.error) : 'da luu .env — restart voice_processing de ap dung';
+  } catch(e){ st.textContent = 'loi: ' + e.message; }
+}
+loadVoiceConfig();
 
 // ── Status polling ─────────────────────────────────────────────────────────
 async function checkStatus() {

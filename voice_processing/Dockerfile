@@ -106,7 +106,18 @@ RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     && python3 -c "import ctranslate2; assert hasattr(ctranslate2, 'get_cuda_device_count')" \
     && ldd /usr/local/lib/libctranslate2.so.4.8.2 | grep -q cublas
 
-# ── 6. TTS (Kokoro ONNX) ──────────────────────────────────────
+# ── 6. TTS (Supertonic-3 ONNX — thay Kokoro + Piper) ──────────
+# Model (382 MB, en/ja/vi, 10 voices) nằm trong agent_assets và được mount
+# runtime; --no-deps để không kéo onnxruntime CPU phá onnxruntime-gpu.
+# supertonic hardcode CPU provider -> tts.py ghi đè loader.DEFAULT_ONNX_PROVIDERS
+# theo ONNX_PROVIDER để chạy CUDA.
+RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
+    --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install --no-index --find-links /tmp/wheels --no-deps \
+        "supertonic>=1.3.1"
+
+# Kokoro packages giữ lại cho kokoro_tts/kokoro_client.py (không còn dùng trong
+# pipeline TTS chính; xem tts.py). espeakng-loader/phonemizer phục vụ module đó.
 RUN --mount=type=bind,source=voice_processing/wheels,target=/tmp/wheels \
     --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --no-index --find-links /tmp/wheels \

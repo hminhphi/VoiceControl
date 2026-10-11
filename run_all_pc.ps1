@@ -62,6 +62,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+# PowerShell 7.4+ coi stderr của native command (docker/ffmpeg/nvidia-smi ghi
+# tiến trình ra stderr) là terminating error khi EAP=Stop -> script -Down chết
+# giữa chừng (containers dừng nhưng host launchers không được kill).
+$PSNativeCommandUseErrorActionPreference = $false
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 $ROOT        = $PSScriptRoot
@@ -141,9 +145,32 @@ function Start-VoiceHost {
         $lines += "`$env:STT_MODEL_TYPE = 'sense_voice'"
         $lines += "`$env:STT_LANGUAGE = 'auto'"
         $lines += "`$env:TTS_LANGUAGE = ''"
+        # TTS Supertonic-3 (thay Kokoro + Piper). Tren host, model nam trong repo.
+        $lines += "`$env:SUPERTONIC_MODEL_DIR = '$VOICE_DIR\agent_assets\models\supertonic-3'"
+        $lines += "`$env:SUPERTONIC_MODEL = 'supertonic-3'"
+        $lines += "`$env:SUPERTONIC_STEPS = '8'"
+        # 1.05 = official default; speed cao làm duration predictor cắt cụt (text có số)
+        $lines += "`$env:SUPERTONIC_SPEED = '1.05'"
+        # Cắt silence đầu/cuối mỗi câu (Supertonic đệm 0.4-0.8s/câu)
+        $lines += "`$env:TTS_TRIM_SILENCE = '1'"
+        $lines += "`$env:TTS_VOICE_EN = 'F1'"
+        $lines += "`$env:TTS_VOICE_JA = 'F1'"
+        $lines += "`$env:TTS_VOICE_VI = 'F1'"
         $lines += "`$env:WHISPER_MODEL = 'large-v3'"
         $lines += "`$env:FASTER_WHISPER_DEVICE = 'cuda'"
         $lines += "`$env:FASTER_WHISPER_COMPUTE = 'float16'"
+        # Chống hallucination (faster-whisper large-v3/turbo) — giống .env/.env.x86:
+        # L0 bỏ segment quá ngắn/nhỏ · L2 loop lặp (compression + collapse n-gram)
+        # L3 chỉ nhận ngôn ngữ auto-detect thuộc danh sách + đủ tự tin
+        $lines += "`$env:STT_MIN_AUDIO_MS = '200'"
+        $lines += "`$env:FW_MIN_RMS = '0.012'"
+        $lines += "`$env:FW_MAX_COMPRESSION = '8.0'"
+        $lines += "`$env:FW_REP_NGRAM_MAX = '10'"
+        $lines += "`$env:FW_REP_MIN_TOKENS = '8'"
+        $lines += "`$env:FW_REP_MAX_SAVING = '0.7'"
+        $lines += "`$env:FW_DROP_FOREIGN_LANG = '1'"
+        $lines += "`$env:FW_ALLOWED_LANGS = 'vi,ja,en'"
+        $lines += "`$env:FW_LANG_MIN_PROB = '0.4'"
         # Weights CTranslate2 local (không tải HuggingFace). Jetson dùng
         # /app/agent_assets/models/... vì voice_processing được mount vào /app;
         # trên host venv nó nằm trong $VOICE_DIR. Cùng logic, khác path theo OS.
@@ -155,7 +182,7 @@ function Start-VoiceHost {
         # ONNX execution providers — phải là TÊN EP đúng danh của onnxruntime.
         # Giống .env / docker-compose (Jetson + x86).
         $lines += "`$env:ONNX_PROVIDER = 'CUDAExecutionProvider'"
-        $lines += "`$env:VAD_PROVIDER = 'cuda'"
+        $lines += "`$env:VAD_PROVIDER = 'cpu'"
         $lines += "`$env:SHERPA_PROVIDER = 'cpu'"
         # onnxruntime-gpu 1.30 build cho CUDA 13 -> cần cublasLt64_13/cudnn (cu13).
         # CTranslate2 (faster-whisper) dùng bộ cu12. Cho cả hai vào PATH.
@@ -185,11 +212,13 @@ function Start-VoiceHost {
         $lines += "`$env:AEC_LIMITER_ENABLED = '1'"
         $lines += "`$env:AEC_LIMITER_CEILING_DBFS = '-3.0'"
         $lines += "`$env:AEC_LIMITER_KNEE = '0.7'"
-        $lines += "`$env:BARGE_IN_ENABLED = '1'"
+        $lines += "`$env:BARGE_IN_ENABLED = '0'"
         $lines += "`$env:BARGE_IN_MIN_PLAY_SEC = '1.0'"
         $lines += "`$env:SEGMENT_SILENCE = '1.0'"
         $lines += "`$env:TURN_END_SILENCE = '2.5'"
         $lines += "`$env:VAD_FIRST_TIMEOUT = '8.0'"
+        # 6 frame liên tiếp (192ms) mới tính speech — chống click/pop kích hoạt oan
+        $lines += "`$env:VAD_WINDOW_SIZE = '3'"
         $lines += "`$env:FOLLOWUP_LISTEN_SEC = '12.0'"
         $lines += "`$env:FOLLOWUP_GRACE_SEC = '0.2'"
         $lines += "`$env:SPEECH_PREROLL_SEC = '0.8'"

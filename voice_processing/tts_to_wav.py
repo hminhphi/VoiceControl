@@ -14,7 +14,7 @@ except ImportError:
     print("Install: pip install soundfile (or uv add soundfile)")
     sys.exit(1)
 
-from tts import TTSProcessor, KOKORO_SAMPLE_RATE
+from tts import TTSProcessor, SUPERTONIC_SAMPLE_RATE
 
 
 def main():
@@ -39,15 +39,8 @@ def main():
         i += 1
     if not out_path.lower().endswith(".wav"):
         out_path += ".wav"
-    tts = TTSProcessor(KOKORO_SAMPLE_RATE)
-    audio, sr = tts.kokoro.create(
-        text=text,
-        voice="af_heart",
-        speed=1.0,
-        lang=lang,
-        is_phonemes=False,
-        trim=True,
-    )
+    tts = TTSProcessor(SUPERTONIC_SAMPLE_RATE)
+    audio, sr = tts.synthesize(text, lang)
     sf.write(out_path, audio, sr)
     print(f"Saved: {out_path}")
 

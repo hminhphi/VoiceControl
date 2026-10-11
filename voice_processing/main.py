@@ -468,7 +468,7 @@ def run():
                     max_preroll = int(SPEECH_PREROLL_SEC * DEVICE_SAMPLE_RATE)
                     if len(pre_speech_audio) > max_preroll:
                         pre_speech_audio = pre_speech_audio[-max_preroll:]
-                    p = vad.get_prob()
+                    p = max(vad.process_all() or [vad.get_prob()])
                     if p > VAD_LOG_THRESHOLD and (now - last_vad_print_time) >= VAD_LOG_INTERVAL:
                         print(f"[VAD][barge] prob={p:.3f} threshold={VAD_DETECT_THRESHOLD:.3f}")
                         last_vad_print_time = now
@@ -506,11 +506,14 @@ def run():
                         print("[VAD] Speech start (barge-in); capturing command")
 
                 if ww_detected:
-                    p = vad.get_prob()
+                    p = max(vad.process_all() or [vad.get_prob()])
                     if p > VAD_LOG_THRESHOLD and (now - last_vad_print_time) >= VAD_LOG_INTERVAL:
                         print(f"[VAD] prob={p:.3f} threshold={VAD_DETECT_THRESHOLD:.3f}")
                         last_vad_print_time = now
-                    if p > VAD_DETECT_THRESHOLD:
+                    # Start gate: require VAD_WINDOW_SIZE consecutive voiced
+                    # frames (is_speech) instead of a single frame > threshold.
+                    # A 30 ms click used to trigger capture and burn the turn.
+                    if vad.is_speech() and p > VAD_DETECT_THRESHOLD:
                         if not vad_detected_once:
                             vad_detected_once = True
                             collected_speech = pre_speech_audio.copy()
@@ -521,26 +524,24 @@ def run():
                     segment_at = last_voice_time + SEGMENT_SILENCE
                     turn_end_at = last_voice_time + TURN_END_SILENCE
                     if pending_turn and now >= turn_end_at:
+                        # Consume the follow-up trigger BEFORE handing the turn
+                        # to STT: on an empty turn process_stt re-arms it, and
+                        # this clear must not race/overwrite that re-arm.
+                        followup_until = None
                         try:
                             stt_queue.put((turn_gen, END_TURN), block=False)
                         except queue.Full:
                             pass
-                        print("[TURN] End detected; sending transcript")
-                        play_notification(
-                            "sending",
-                            output_queue,
-                            CHUNK,
-                            DEVICE_SAMPLE_RATE,
-                        )
+                        # Chi ket thuc LUOT THU AM o day. Transcript chi duoc gui
+                        # khi STT that su co text (xem process_stt) - neu STT tra
+                        # rong thi khong gui, khong phat tieng "sending".
+                        print("[TURN] End of speech; finalizing transcript")
                         ww_detected = False
                         timeout_at = None
                         last_voice_time = None
                         pending_turn = False
                         collected_speech = np.array([], dtype=np.int16)
                         pre_speech_audio = np.array([], dtype=np.int16)
-                        # Consume follow-up trigger; process_stt re-arms a fresh
-                        # window after the reply finishes playing.
-                        followup_until = None
                     elif now >= segment_at and len(collected_speech) > 0:
                         dur = len(collected_speech) / DEVICE_SAMPLE_RATE
                         if dur >= MIN_SEGMENT_SEC:
@@ -606,6 +607,7 @@ def run():
         turn_texts = []
         turn_lang = None
         turn_audio_parts = []
+        last_drop_reason = None
         buf_gen = None
         while not stop.is_set():
             try:
@@ -621,13 +623,26 @@ def run():
                     turn_texts = []
                     turn_lang = None
                     turn_audio_parts = []
+                    last_drop_reason = None
                     buf_gen = item_gen
                 if item is END_TURN:
                     text = " ".join(turn_texts).strip()
                     turn_texts = []
                     if not text:
-                        print("[TURN] No transcript text; skip response")
+                        print(
+                            "[TURN] No speech recognized (empty transcript); "
+                            f"turn ignored (last drop: {last_drop_reason or 'none'})"
+                        )
                         turn_lang = None
+                        last_drop_reason = None
+                        # A stray click/noise must not close the listening
+                        # session: re-arm the follow-up window so the user can
+                        # still speak the next command without the wake word.
+                        followup_until = time.time() + FOLLOWUP_LISTEN_SEC
+                        print(
+                            f"[followup] Empty turn; re-arming follow-up window "
+                            f"({FOLLOWUP_LISTEN_SEC:.0f}s)"
+                        )
                         continue
                     lang = turn_lang
                     print(f"[TURN] Transcript ready: {text!r} lang={lang}")
@@ -683,7 +698,9 @@ def run():
                     t0 = time.time()
                     out = stt.transcribe(audio)
                     part = out.get("text", "").strip()
+                    drop_reason = out.get("drop_reason") or "empty"
                     if not part:
+                        last_drop_reason = drop_reason
                         saved_path = _save_debug_segment(audio, "empty_stt", dur)
                         if saved_path:
                             print(f"[STT][debug] saved empty segment: {saved_path}")
@@ -702,6 +719,7 @@ def run():
                         f"[STT] Segment done audio_dur={dur:.2f}s "
                         f"infer={time.time()-t0:.2f}s text={part!r} "
                         f"lang={seg_lang}"
+                        + (f" drop={drop_reason}" if not part else "")
                     )
                     continue
                 if not text:
@@ -717,6 +735,12 @@ def run():
                     # is bumped and this turn's late segments are dropped.
                     req_gen = turn_gen
                     print(f"[ORCH] Sending transcript session={session_id}: {text!r}")
+                    play_notification(
+                        "sending",
+                        output_queue,
+                        CHUNK,
+                        DEVICE_SAMPLE_RATE,
+                    )
                     is_tts_playing = True
                     tts_play_start = time.time()
                     abort_reply.clear()
@@ -859,7 +883,10 @@ def run():
                         )
                     if not announced_ready:
                         tts.speech(
-                            "FPT Automotive AI is ready",
+                            # "FPT" phải nằm giữa câu: đứng đầu câu Supertonic
+                            # đọc hỏng (0/6 lần đúng), có lead-in thì 8/8 đúng
+                            # (đo 2026-10-06).
+                            "This is FPT Automotive AI, ready to help.",
                             language=startup_tts_lang,
                             output_queue=output_queue,
                             chunk_size=CHUNK,

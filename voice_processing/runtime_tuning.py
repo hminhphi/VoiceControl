@@ -54,22 +54,28 @@ def configure_onnxruntime():
     original_session_options = ort.SessionOptions
     original_inference_session = ort.InferenceSession
 
-    def session_options(*args, **kwargs):
-        return _tune_session_options(original_session_options(*args, **kwargs))
+    # Dung SUBCLASS thay vi function wrapper: vai thu vien (vd supertonic)
+    # kiem tra `isinstance(session, ort.InferenceSession)`; neu ten do bi thay
+    # bang mot ham thi isinstance nem TypeError
+    # ("arg 2 must be a type, a tuple of types, or a union").
+    class _TunedSessionOptions(original_session_options):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            _tune_session_options(self)
 
-    def inference_session(*args, **kwargs):
-        args = list(args)
-        if len(args) >= 2:
-            if args[1] is None:
-                args[1] = session_options()
-        else:
-            options = kwargs.get("sess_options")
-            if options is None:
-                kwargs["sess_options"] = session_options()
-        return original_inference_session(*args, **kwargs)
+    class _TunedInferenceSession(original_inference_session):
+        def __init__(self, *args, **kwargs):
+            args = list(args)
+            if len(args) >= 2:
+                if args[1] is None:
+                    args[1] = _TunedSessionOptions()
+            else:
+                if kwargs.get("sess_options") is None:
+                    kwargs["sess_options"] = _TunedSessionOptions()
+            super().__init__(*args, **kwargs)
 
-    ort.SessionOptions = session_options
-    ort.InferenceSession = inference_session
+    ort.SessionOptions = _TunedSessionOptions
+    ort.InferenceSession = _TunedInferenceSession
     ort._orchestrator_runtime_tuned = True
     return True
 

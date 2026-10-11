@@ -19,12 +19,10 @@ def _get_local_now() -> datetime:
 from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
  
-from router import OrchestratorRouter
-from client import send_to_agents_parallel, send_to_agent
+from client import send_to_agent
 from display_graphql import send_car_manual_face_card_with_details
 from llm import LlmClient
 from prompts import (
-    ORCHESTRATOR_PROMPT,
     DORA_TOOL_SYSTEM_PROMPT,
     DORA_SYNTHESIS_SYSTEM_PROMPT,
     ORCHESTRATOR_TOOLS,
@@ -44,7 +42,6 @@ router = APIRouter(prefix="/orchestrator", tags=["Orchestrator"])
  
 registry = AgentRegistry()
 context_store = PerAgentContext()
-orchestrator_router = OrchestratorRouter()
 ws_manager = WebSocketManager()
 llm_client = LlmClient()
 
@@ -111,159 +108,24 @@ def _store_assistant_reply(session_id: str, text: str) -> None:
         context_store.add(session_id, "llm_orchestrator", "assistant", text)
 
 
-def _format_score(value) -> str:
-    if value is None:
-        return "n/a"
-    try:
-        return f"{float(value):.4f}"
-    except (TypeError, ValueError):
-        return str(value)
 
 
-def _format_agent_diagnostic(item: dict, route_score, route_threshold=None) -> str:
-    meta = item.get("meta") or {}
-    parts = [
-        f"agent={item.get('agent_id')}",
-        f"success={item.get('success')}",
-        f"route_score={_format_score(route_score)}",
-    ]
-    if route_threshold is not None:
-        parts.append(f"route_threshold={_format_score(route_threshold)}")
-
-    source = meta.get("source")
-    if source:
-        parts.append(f"source={source}")
-
-    if "score" in meta:
-        parts.append(f"fact_score={_format_score(meta.get('score'))}")
-    if "embedding_score" in meta:
-        parts.append(f"embedding_score={_format_score(meta.get('embedding_score'))}")
-    if meta.get("match_source"):
-        parts.append(f"match_source={meta.get('match_source')}")
-    if meta.get("matched_label"):
-        parts.append(f"matched_label={meta.get('matched_label')!r}")
-    if "local_fact_best_score" in meta:
-        parts.append(f"local_fact_best_score={_format_score(meta.get('local_fact_best_score'))}")
-    if "local_fact_threshold" in meta:
-        parts.append(f"threshold={_format_score(meta.get('local_fact_threshold'))}")
-
-    if "llm_rewrite_attempted" in meta:
-        parts.append(f"llm_rewrite_attempted={meta.get('llm_rewrite_attempted')}")
-    if "llm_rewrite_accepted" in meta:
-        parts.append(f"llm_rewrite_accepted={meta.get('llm_rewrite_accepted')}")
-    if "llm_rewrite_confidence" in meta and meta.get("llm_rewrite_confidence") is not None:
-        parts.append(f"llm_rewrite_confidence={_format_score(meta.get('llm_rewrite_confidence'))}")
-    if meta.get("llm_rewrite_query"):
-        parts.append(f"llm_rewrite_query={meta.get('llm_rewrite_query')!r}")
-    if meta.get("llm_rewrite_model"):
-        parts.append(f"llm_rewrite_model={meta.get('llm_rewrite_model')}")
-    if meta.get("llm_rewrite_error"):
-        parts.append(f"llm_rewrite_error={meta.get('llm_rewrite_error')}")
-    if meta.get("llm_rewrite_skipped"):
-        parts.append(f"llm_rewrite_skipped={meta.get('llm_rewrite_skipped')}")
-
-    matched_q = meta.get("matched_q")
-    if matched_q:
-        parts.append(f"matched_q={matched_q!r}")
-
-    original_query = meta.get("original_query")
-    rewritten_query = meta.get("rewritten_query")
-    if original_query:
-        parts.append(f"original_query={original_query!r}")
-    if rewritten_query and rewritten_query != original_query:
-        parts.append(f"rewritten_query={rewritten_query!r}")
-
-    return " ".join(parts)
 
 
-def _format_aws_face_card_diagnostic(details: dict) -> str:
-    parts = [
-        "aws_face_card",
-        f"attempted={details.get('attempted')}",
-        f"success={details.get('success')}",
-        f"name={details.get('name')!r}",
-    ]
-    if details.get("mutation_success") is not None:
-        parts.append(f"mutation_success={details.get('mutation_success')}")
-    if details.get("vehicle_id"):
-        parts.append(f"vehicle_id={details.get('vehicle_id')}")
-    if details.get("intent_code") is not None:
-        parts.append(f"intent_code={details.get('intent_code')}")
-    if details.get("request_id"):
-        parts.append(f"request_id={details.get('request_id')!r}")
-    if details.get("status"):
-        parts.append(f"status={details.get('status')!r}")
-    if details.get("reason_code"):
-        parts.append(f"reason_code={details.get('reason_code')!r}")
-    if details.get("value"):
-        parts.append(f"value={details.get('value')!r}")
-    if details.get("returned_name"):
-        parts.append(f"returned_name={details.get('returned_name')!r}")
-    if details.get("returned_value"):
-        parts.append(f"returned_value={details.get('returned_value')!r}")
-    if details.get("matched_q"):
-        parts.append(f"matched_q={details.get('matched_q')!r}")
-    if details.get("error"):
-        parts.append(f"error={details.get('error')!r}")
-    if details.get("reason"):
-        parts.append(f"reason={details.get('reason')!r}")
-    return " ".join(parts)
 
 
-def _build_llm_agent_responses(final_agent_response: dict, raw_agent_response: list[dict]) -> list[dict]:
-    responses = [dict(item) for item in final_agent_response.get("responses", [])]
-
-    raw_by_agent = {
-        item.get("agent_id"): item
-        for item in raw_agent_response
-        if item.get("agent_id")
-    }
-
-    for response in responses:
-        if response.get("agent_id") != "car_manual":
-            continue
-
-        raw = raw_by_agent.get("car_manual") or {}
-        meta = raw.get("meta") or {}
-        passes_threshold = meta.get("passes_threshold")
-        if response.get("success") is False or passes_threshold is False:
-            response["message"] = "No answer found."
-            if "score" in meta:
-                response["fact_score"] = meta.get("score")
-            if "local_fact_threshold" in meta:
-                response["threshold"] = meta.get("local_fact_threshold")
-            if "passes_threshold" in meta:
-                response["passes_threshold"] = passes_threshold
-            continue
-
-        documents = (raw.get("data") or {}).get("documents") or []
-        best_doc = documents[0] if documents else {}
-
-        matched_q = meta.get("matched_q") or best_doc.get("q")
-        matched_answer = best_doc.get("a") or raw.get("message")
-
-        if matched_q:
-            response["matched_q"] = matched_q
-        if matched_answer:
-            response["matched_answer"] = matched_answer
-        if meta.get("forced_query"):
-            response["forced_query"] = meta.get("forced_query")
-        if "score" in meta:
-            response["fact_score"] = meta.get("score")
-        if "local_fact_threshold" in meta:
-            response["threshold"] = meta.get("local_fact_threshold")
-        if "passes_threshold" in meta:
-            response["passes_threshold"] = meta.get("passes_threshold")
-
-    return responses
 
 
 def _generate_natural_fallback(user_message: str, agent_responses: list[dict]) -> str:
     user_lower = (user_message or "").strip().lower()
 
     # Detect language
-    is_ja = any(j in (user_message or "") for j in ("何時", "時間", "何日", "何曜日", "こんにちは", "おはよう", "こんばんは", "開けて", "閉めて", "つけて", "消して", "ドア", "トランク", "ライト", "エアコン", "窓", "誰"))
-    is_vi = any(v in user_lower for v in ("mấy giờ", "may gio", "xem giờ", "mấy h", "ngày mấy", "thứ mấy", "chào", "xin chào", "bạn là ai", "bạn khỏe không", "mở", "đóng", "bật", "tắt", "cửa", "cốp", "đèn", "điều hòa", "máy lạnh", "kính"))
+    # Script-based detection (vi diacritics / ja kana) instead of keyword lists:
+    # the old lists missed most real commands and produced English fallbacks in
+    # Vietnamese turns (measured 2026-10-06).
+    _fallback_lang = _detect_lang(user_message or "")
+    is_ja = _fallback_lang == "ja"
+    is_vi = _fallback_lang == "vi"
 
     # 1. Time queries
     time_triggers = (
@@ -415,6 +277,10 @@ def _generate_natural_fallback(user_message: str, agent_responses: list[dict]) -
             if item.get("message") and item.get("message") != "No answer found.":
                 return str(item.get("message")).strip()
             if any(w in user_lower for w in ("how", "what", "where", "guide", "manual", "làm sao", "ở đâu")):
+                if is_ja:
+                    return "車両マニュアルに関連する情報が見つかりませんでした。"
+                if is_vi:
+                    return "Tôi không tìm thấy thông tin này trong tài liệu hướng dẫn xe."
                 return "I couldn't find relevant information in the vehicle manual."
 
     # 5. Any other successful response
@@ -426,310 +292,19 @@ def _generate_natural_fallback(user_message: str, agent_responses: list[dict]) -
             if m:
                 return str(m)
 
+    if is_ja:
+        return "申し訳ありませんが、そのご質問にはお答えできません。"
+    if is_vi:
+        return "Xin lỗi, tôi không thể giúp với yêu cầu đó."
     return "Sorry, I can't help with that request."
 
 
-async def stream_llm(session_id, messages, user_message=None, agent_responses=None):
-    logger.info("Starting LLM stream for session_id=%s", session_id)
-    full_text = ""
-
-    try:
-        async for token in llm_client.stream_chat_completion(messages):
-            full_text += token
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "token",
-                    "content": token,
-                },
-            )
-
-        logger.info("LLM stream done for session_id=%s", session_id)
-        logger.info("LLM full_text for session_id=%s: %s", session_id, full_text)
-
-        if not full_text.strip():
-            if user_message is None or agent_responses is None:
-                try:
-                    content = messages[1]["content"]
-                    if "This is the original user request:\n" in content:
-                        part = content.split("This is the original user request:\n")[1]
-                        user_message = part.split("\n\n")[0]
-                    if "agent_response JSON:\n" in content:
-                        json_part = content.split("agent_response JSON:\n")[-1]
-                        data = json.loads(json_part)
-                        agent_responses = data if isinstance(data, list) else data.get("responses", [])
-                except Exception:
-                    pass
-            fallback_msg = _generate_natural_fallback(user_message, agent_responses)
-            logger.info("LLM generated empty response, using fallback for session_id=%s: %s", session_id, fallback_msg)
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "token",
-                    "content": fallback_msg,
-                },
-            )
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "done",
-                    "message": fallback_msg,
-                },
-            )
-            return fallback_msg
-        else:
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "done",
-                    "message": full_text,
-                },
-            )
-            return full_text
-
-    except Exception as e:
-        logger.warning("LLM streaming unavailable (%s), falling back to natural response", e)
-
-        if user_message is None or agent_responses is None:
-            try:
-                content = messages[1]["content"]
-                if "This is the original user request:\n" in content:
-                    part = content.split("This is the original user request:\n")[1]
-                    user_message = part.split("\n\n")[0]
-                if "agent_response JSON:\n" in content:
-                    json_part = content.split("agent_response JSON:\n")[-1]
-                    data = json.loads(json_part)
-                    agent_responses = data if isinstance(data, list) else data.get("responses", [])
-            except Exception:
-                pass
-
-        fallback_msg = _generate_natural_fallback(user_message, agent_responses)
-        logger.info("Generated natural fallback for session_id=%s: %s", session_id, fallback_msg)
-
-        await _send_to_session_and_frontend(
-            session_id,
-            {
-                "type": "token",
-                "content": fallback_msg,
-            },
-        )
-        await _send_to_session_and_frontend(
-            session_id,
-            {
-                "type": "done",
-                "message": fallback_msg,
-            },
-        )
-        return fallback_msg
 
 
-LOW_SCORE_FAIL_FILTER = 0.35
-DIRECT_TTS_MANUAL_ANSWERS = {"ok, i will show you the fpt logo"}
 
 
-def _find_direct_tts_manual_answer(agent_response: list[dict]) -> str | None:
-    for item in agent_response:
-        if item.get("agent_id") != "car_manual":
-            continue
-        if item.get("success") is not True:
-            continue
-
-        meta = item.get("meta") or {}
-        if meta.get("passes_threshold") is not True:
-            continue
-
-        documents = (item.get("data") or {}).get("documents") or []
-        first_doc = documents[0] if documents else {}
-        answer = str(first_doc.get("a") or item.get("message") or "").strip()
-        if answer.casefold() in DIRECT_TTS_MANUAL_ANSWERS:
-            return answer
-
-    return None
 
 
-async def process_request(session_id, user_message, agent_ids, agent_scores):
-
-    logger.info(
-        f"Processing request session_id={session_id}, "
-        f"agent_ids={agent_ids}, message='{user_message}'"
-    )
-
-    if session_id.startswith("voice-"):
-        await ws_manager.send(
-            "frontend",
-            {"type": "user_message", "session_id": session_id, "content": user_message, "agent_ids": agent_ids},
-        )
-
-    try:
-
-        # ---------- call agents ----------
-
-        agent_response = await send_to_agents_parallel(
-            agent_ids,
-            user_message,
-            context_store,
-            session_id,
-            registry,
-        )
-
-        logger.info(
-            f"Agent responses for session_id={session_id}: {agent_response}"
-        )
-
-        if session_id.startswith("voice-"):
-            for item in agent_response:
-                aid = item.get("agent_id")
-                await _send_to_session_and_frontend(
-                    session_id,
-                    {
-                        "type": "session_log",
-                        "content": _format_agent_diagnostic(
-                            item,
-                            agent_scores.get(aid),
-                            orchestrator_router.threshold,
-                        ),
-                    },
-                )
-
-        # ---------- filter by routing score & success ----------
-
-        filtered_agent_response = []
-        for item in agent_response:
-            aid = item.get("agent_id")
-            success = item.get("success")
-            score = agent_scores.get(aid)
-            if (
-                success is False
-                and score is not None
-                and score < LOW_SCORE_FAIL_FILTER
-            ):
-                logger.info(
-                    "Dropping agent response due to low score and failure: "
-                    "agent_id=%s, score=%.3f, success=%s",
-                    aid,
-                    float(score),
-                    success,
-                )
-                continue
-            filtered_agent_response.append(item)
-
-        # ---------- best-effort AWS face-card upload from raw car_manual data ----------
-
-        for item in filtered_agent_response:
-            if item.get("agent_id") == "car_manual":
-                aws_details = send_car_manual_face_card_with_details(item)
-                aws_diagnostic = _format_aws_face_card_diagnostic(aws_details)
-                if aws_details.get("success"):
-                    logger.info(
-                        "Uploaded car_manual face card to AWS for session_id=%s: %s",
-                        session_id,
-                        aws_diagnostic,
-                    )
-                else:
-                    logger.warning(
-                        "car_manual face card AWS upload did not succeed for session_id=%s: %s",
-                        session_id,
-                        aws_diagnostic,
-                    )
-                break
-
-        # ---------- post process ----------
-
-        final_agent_response = post_process_agent_response(filtered_agent_response)
-
-        logger.info(
-            f"Post-processed agent responses for session_id={session_id}: "
-            f"{final_agent_response}"
-        )
-
-        # ---------- send DATA first ----------
-
-        await _send_to_session_and_frontend(
-            session_id,
-            {
-                "type": "data",
-                "content": final_agent_response["data"],
-            },
-        )
-
-        # ---------- direct TTS/manual response bypass ----------
-
-        direct_tts_answer = _find_direct_tts_manual_answer(filtered_agent_response)
-        if direct_tts_answer:
-            logger.info(
-                "Bypassing LLM for direct car_manual TTS response: session_id=%s answer=%r",
-                session_id,
-                direct_tts_answer,
-            )
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "token",
-                    "content": direct_tts_answer,
-                },
-            )
-            await _send_to_session_and_frontend(
-                session_id,
-                {
-                    "type": "done",
-                    "message": direct_tts_answer,
-                },
-            )
-            return
-
-        # ---------- prepare LLM ----------
-
-        forced_manual_query = next(
-            (
-                (item.get("meta") or {}).get("forced_query")
-                for item in filtered_agent_response
-                if item.get("agent_id") == "car_manual"
-            ),
-            None,
-        )
-        llm_user_message = forced_manual_query or user_message
-        llm_agent_responses = _build_llm_agent_responses(
-            final_agent_response,
-            filtered_agent_response,
-        )
-
-        now_str = _get_local_now().strftime("%A, %B %d, %Y %I:%M %p")
-
-        messages = [
-            {"role": "system", "content": f"{ORCHESTRATOR_PROMPT}\n\nContext:\nCurrent local time and date: {now_str}"},
-            {
-                "role": "user",
-                "content": (
-                    f"This is the original user request:\n{user_message}\n\n"
-                    f"This is the matched request to answer:\n{llm_user_message}\n\n"
-                    f"This is the agent_response JSON:\n"
-                    f"{json.dumps(llm_agent_responses, ensure_ascii=False)}"
-                ),
-            },
-        ]
-
-        # ---------- stream LLM second ----------
-
-        await stream_llm(
-            session_id,
-            messages,
-            user_message=user_message,
-            agent_responses=llm_agent_responses,
-        )
-
-    except Exception as e:
-
-        logger.exception(
-            f"Error processing request for session_id={session_id}: {e}"
-        )
-
-        await _send_to_session_and_frontend(
-            session_id,
-            {
-                "type": "error",
-                "message": str(e),
-            },
-        )
  
  
 def _detect_lang(text: str) -> str:
@@ -791,6 +366,25 @@ STT_CORRECTIONS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\ba/c\b", re.IGNORECASE), "ac"),
 ]
 
+def _turn2_lang_instruction(user_lang: str) -> str:
+    if user_lang == "vi":
+        return "Trả lời ngắn gọn bằng tiếng Việt (1-2 câu)."
+    if user_lang == "ja":
+        return "1〜2文の簡潔な日本語で回答してください。"
+    return "Answer concisely in English in 1-2 friendly sentences."
+
+
+async def _stream_turn2(session_id: str, turn2_messages: list) -> str:
+    """Stream the LLM Turn-2 synthesis and return the full reply text."""
+    full_text = ""
+    async for token in llm_client.stream_chat_completion(turn2_messages):
+        full_text += token
+        await _send_to_session_and_frontend(
+            session_id, {"type": "token", "content": token}
+        )
+    return full_text
+
+
 def _correct_stt_transcript(text: str) -> str:
     """Phonetically normalize car-control terms; returns corrected text."""
     original = text
@@ -802,68 +396,6 @@ def _correct_stt_transcript(text: str) -> str:
     return corrected
 
 
-CAR_CONFIRMATIONS = {
-    ("open", "left_door"): {
-        "en": "The left door has been opened.",
-        "vi": "Cửa bên trái đã được mở.",
-        "ja": "左側のドアを開けました。",
-    },
-    ("close", "left_door"): {
-        "en": "The left door has been closed.",
-        "vi": "Cửa bên trái đã được đóng.",
-        "ja": "左側のドアを閉めました。",
-    },
-    ("open", "right_door"): {
-        "en": "The right door has been opened.",
-        "vi": "Cửa bên phải đã được mở.",
-        "ja": "右側のドアを開けました。",
-    },
-    ("close", "right_door"): {
-        "en": "The right door has been closed.",
-        "vi": "Cửa bên phải đã được đóng.",
-        "ja": "右側のドアを閉めました。",
-    },
-    ("open", "trunk"): {
-        "en": "The trunk has been opened.",
-        "vi": "Cốp xe đã được mở.",
-        "ja": "トランクを開けました。",
-    },
-    ("close", "trunk"): {
-        "en": "The trunk has been closed.",
-        "vi": "Cốp xe đã được đóng.",
-        "ja": "トランクを閉めました。",
-    },
-    ("turn_on", "light"): {
-        "en": "The headlights have been turned on.",
-        "vi": "Đèn xe đã được bật.",
-        "ja": "ライトを点灯しました。",
-    },
-    ("turn_off", "light"): {
-        "en": "The headlights have been turned off.",
-        "vi": "Đèn xe đã được tắt.",
-        "ja": "ライトを消灯しました。",
-    },
-    ("turn_on", "ac"): {
-        "en": "The air conditioner has been turned on.",
-        "vi": "Điều hòa đã được bật.",
-        "ja": "エアコンをつけました。",
-    },
-    ("turn_off", "ac"): {
-        "en": "The air conditioner has been turned off.",
-        "vi": "Điều hòa đã được tắt.",
-        "ja": "エアコンを停止しました。",
-    },
-    ("open", "window"): {
-        "en": "The windows are opened.",
-        "vi": "Cửa sổ đã được mở.",
-        "ja": "窓を開けました。",
-    },
-    ("close", "window"): {
-        "en": "The windows are closed.",
-        "vi": "Cửa sổ đã được đóng.",
-        "ja": "窓を閉めました。",
-    },
-}
 
 CAR_ACTION_CMD_MAP = {
     ("open", "left_door"): "open left door",
@@ -912,54 +444,10 @@ def _normalize_car_actions(fn_args: dict) -> list[tuple[str, str]]:
     return pairs
 
 
-def _car_confirmation(action: str, component: str, user_lang: str) -> str:
-    """One natural confirmation sentence for a single (action, component)."""
-    if component in ("light", "ac"):
-        act_norm = "turn_on" if action in ("open", "turn_on") else "turn_off"
-    else:
-        act_norm = "open" if action in ("open", "turn_on") else "close"
-    conf_dict = CAR_CONFIRMATIONS.get((act_norm, component), {})
-    sentence = conf_dict.get(user_lang) or conf_dict.get("en")
-    if sentence:
-        return sentence
-    label = CAR_ACTION_CMD_MAP.get((act_norm, component), f"{action} {component}")
-    if user_lang == "vi":
-        return f"Đã thực hiện lệnh {label}."
-    if user_lang == "ja":
-        return f"{label}を実行しました。"
-    return f"{label} executed successfully."
 
 
-def _car_failure_note(failed_pairs: list[tuple[str, str]], user_lang: str) -> str:
-    labels = ", ".join(
-        CAR_ACTION_CMD_MAP.get(
-            (
-                ("turn_on" if a in ("open", "turn_on") else "turn_off")
-                if c in ("light", "ac")
-                else ("open" if a in ("open", "turn_on") else "close"),
-                c,
-            ),
-            f"{a} {c}",
-        )
-        for a, c in failed_pairs
-    )
-    if user_lang == "vi":
-        return f"Xin lỗi, không thể thực hiện: {labels}."
-    if user_lang == "ja":
-        return f"申し訳ありませんが、実行できませんでした: {labels}。"
-    return f"Sorry, I couldn't execute: {labels}."
 
 
-def _build_car_confirmations(
-    ok_pairs: list[tuple[str, str]],
-    failed_pairs: list[tuple[str, str]],
-    user_lang: str,
-) -> str:
-    """Merge per-action confirmations (natural spoken style, no LLM round)."""
-    parts = [_car_confirmation(a, c, user_lang) for a, c in ok_pairs]
-    if failed_pairs:
-        parts.append(_car_failure_note(failed_pairs, user_lang))
-    return " ".join(parts)
 
 
 async def process_request_tool_calling(session_id: str, user_message: str, language: str | None = None):
@@ -986,7 +474,13 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
         now = _get_local_now()
         now_str = now.strftime("%A, %B %d, %Y %I:%M %p")
 
-        user_lang = _normalize_lang_hint(language) or _detect_lang(user_message)
+        # Prefer the transcript's own script (vi diacritics / ja kana) over the
+        # STT hint: short/quiet speech often carries a wrong hint (2026-10-06:
+        # VI speech hinted as "en" produced English fallbacks inside a VI reply).
+        _script_lang = _detect_lang(user_message)
+        user_lang = _script_lang if _script_lang in ("vi", "ja") else (
+            _normalize_lang_hint(language) or _script_lang
+        )
 
         # Conversation history for this session (user + assistant turns, capped by
         # PerAgentContext). The current user message was already added at ingress
@@ -1094,34 +588,76 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 {"type": "data", "content": final_agent_response["data"]},
             )
 
-            # Per-action success/fail (car_control returns results[]); fall back
-            # to the aggregate success flag for backward compatibility.
+            # Per-action results (car_control returns results[]); fall back to
+            # the aggregate success flag for backward compatibility.
             results = (agent_res.get("meta") or {}).get("results") or []
+
+            # Pure-LLM: no template fast-return. Feed the tool results back to
+            # the LLM (Turn 2) so it composes the confirmation naturally and in
+            # the user's language.
             if results:
-                ok_pairs = [
-                    (r.get("action", ""), r.get("component", ""))
-                    for r in results
-                    if r.get("ok")
-                ]
-                failed_pairs = [p for p in car_pairs if p not in ok_pairs]
-            elif agent_res.get("success") is not False:
-                ok_pairs, failed_pairs = list(car_pairs), []
+                facts = json.dumps(
+                    {
+                        "actions": [
+                            {
+                                "action": r.get("action"),
+                                "component": r.get("component"),
+                                "ok": r.get("ok"),
+                            }
+                            for r in results
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
             else:
-                ok_pairs, failed_pairs = [], list(car_pairs)
+                facts = json.dumps(
+                    {
+                        "actions": [
+                            {
+                                "action": a,
+                                "component": c,
+                                "ok": agent_res.get("success") is not False,
+                            }
+                            for a, c in car_pairs
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
 
-            confirmation = _build_car_confirmations(ok_pairs, failed_pairs, user_lang)
-            if not confirmation:
-                if user_lang == "vi":
-                    confirmation = "Xin lỗi, không thể thực hiện lệnh điều khiển xe này."
-                elif user_lang == "ja":
-                    confirmation = "申し訳ありませんが、その車両コマンドを実行できませんでした。"
-                else:
-                    confirmation = "Sorry, I couldn't execute that command on the vehicle."
+            turn2_messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        f"{DORA_SYNTHESIS_SYSTEM_PROMPT}\n"
+                        f"{_turn2_lang_instruction(user_lang)}"
+                    ),
+                },
+                *history[:-1][-6:],
+                {
+                    "role": "user",
+                    "content": (
+                        f"User Request: {user_message}\n"
+                        f"Vehicle command results (JSON):\n{facts}\n\n"
+                        f"Confirm naturally what was done or what failed, "
+                        f"in 1-2 short spoken sentences:"
+                    ),
+                },
+            ]
 
-            logger.info("Fast Return car_control for session_id=%s: %s", session_id, confirmation)
-            await _send_to_session_and_frontend(session_id, {"type": "token", "content": confirmation})
-            await _send_to_session_and_frontend(session_id, {"type": "done", "message": confirmation})
-            _store_assistant_reply(session_id, confirmation)
+            full_turn2_text = await _stream_turn2(session_id, turn2_messages)
+            if not full_turn2_text.strip():
+                fallback_msg = _generate_natural_fallback(user_message, [agent_res])
+                await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
+                await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_msg})
+                _store_assistant_reply(session_id, fallback_msg)
+            else:
+                logger.info(
+                    "Turn 2 synthesis completed (car_control) for session_id=%s: %s",
+                    session_id,
+                    full_turn2_text,
+                )
+                await _send_to_session_and_frontend(session_id, {"type": "done", "message": full_turn2_text})
+                _store_assistant_reply(session_id, full_turn2_text)
             return
 
         # ====== Tool: search_car_manual ======
@@ -1151,15 +687,6 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 {"type": "data", "content": final_agent_response["data"]},
             )
 
-            # Direct TTS bypass if matched (e.g. FPT logo)
-            direct_tts_answer = _find_direct_tts_manual_answer([agent_res])
-            if direct_tts_answer:
-                logger.info("Direct TTS bypass for session_id=%s: %s", session_id, direct_tts_answer)
-                await _send_to_session_and_frontend(session_id, {"type": "token", "content": direct_tts_answer})
-                await _send_to_session_and_frontend(session_id, {"type": "done", "message": direct_tts_answer})
-                _store_assistant_reply(session_id, direct_tts_answer)
-                return
-
             # Extract facts from docs or message
             docs = (agent_res.get("data") or {}).get("documents") or []
             meta = agent_res.get("meta") or {}
@@ -1169,55 +696,37 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
             elif agent_res.get("message") and agent_res.get("message") != "No answer found." and meta.get("passes_threshold") is not False:
                 rag_text = str(agent_res.get("message"))
 
-            if not rag_text.strip():
-                if user_lang == "vi":
-                    no_info = "Tôi không tìm thấy thông tin này trong tài liệu hướng dẫn xe."
-                elif user_lang == "ja":
-                    no_info = "車両マニュアルに関連する情報が見つかりませんでした。"
-                else:
-                    no_info = "I couldn't find relevant information in the vehicle manual."
-                logger.info("No manual facts found, sending localized message: %s", no_info)
-                await _send_to_session_and_frontend(session_id, {"type": "token", "content": no_info})
-                await _send_to_session_and_frontend(session_id, {"type": "done", "message": no_info})
-                _store_assistant_reply(session_id, no_info)
-                return
-
-            # Synthesize answer using streaming LLM Turn 2
-            lang_instruction = (
-                "Trả lời ngắn gọn bằng tiếng Việt (1-2 câu)." if user_lang == "vi"
-                else ("1〜2文の簡潔な日本語で回答してください。" if user_lang == "ja"
-                else "Answer concisely in English in 1-2 friendly sentences.")
+            # Pure-LLM: always synthesize via Turn 2, even with no facts (the
+            # LLM answers naturally that it could not find the information).
+            knowledge = (
+                rag_text if rag_text.strip()
+                else "(no relevant manual information found)"
             )
             turn2_messages = [
                 {
                     "role": "system",
-                    "content": f"{DORA_SYNTHESIS_SYSTEM_PROMPT}\n{lang_instruction}",
+                    "content": (
+                        f"{DORA_SYNTHESIS_SYSTEM_PROMPT}\n"
+                        f"{_turn2_lang_instruction(user_lang)}"
+                    ),
                 },
                 *history[:-1][-6:],
                 {
                     "role": "user",
                     "content": (
                         f"User Question: {user_message}\n"
-                        f"Vehicle Manual Knowledge:\n{rag_text}\n\n"
+                        f"Vehicle Manual Knowledge:\n{knowledge}\n\n"
                         f"Provide a natural, direct spoken answer to the user:"
                     ),
                 },
             ]
 
-            full_turn2_text = ""
-            logger.info("Streaming Turn 2 synthesis for session_id=%s", session_id)
-            async for token in llm_client.stream_chat_completion(turn2_messages):
-                full_turn2_text += token
-                await _send_to_session_and_frontend(
-                    session_id,
-                    {"type": "token", "content": token},
-                )
-
+            full_turn2_text = await _stream_turn2(session_id, turn2_messages)
             if not full_turn2_text.strip():
-                fallback_fact = docs[0].get("a") if docs else rag_text
-                await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_fact})
-                await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_fact})
-                _store_assistant_reply(session_id, fallback_fact)
+                fallback_msg = _generate_natural_fallback(user_message, [agent_res])
+                await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
+                await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_msg})
+                _store_assistant_reply(session_id, fallback_msg)
             else:
                 logger.info("Turn 2 synthesis completed for session_id=%s: %s", session_id, full_turn2_text)
                 await _send_to_session_and_frontend(session_id, {"type": "done", "message": full_turn2_text})
@@ -1225,9 +734,11 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
             return
 
         else:
-            logger.warning("Unknown tool call %r, falling back to direct completion", fn_name)
-            reply = await stream_llm(session_id, messages, user_message=user_message, agent_responses=[])
-            _store_assistant_reply(session_id, reply)
+            logger.warning("Unknown tool call %r; using natural fallback", fn_name)
+            fallback_msg = _generate_natural_fallback(user_message, [])
+            await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
+            await _send_to_session_and_frontend(session_id, {"type": "done", "message": fallback_msg})
+            _store_assistant_reply(session_id, fallback_msg)
 
     except Exception as e:
         logger.exception("Error in process_request_tool_calling session_id=%s: %s", session_id, e)

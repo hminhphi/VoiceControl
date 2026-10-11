@@ -12,6 +12,97 @@ load_dotenv()
 logger = logging.getLogger("orchestrator.llm")
 
 
+_THINK_OPEN = '<think>'
+_THINK_CLOSE = '</think>'
+
+
+class _ThinkStripper:
+    """Remove  thinking... blocks from a streamed chat reply.
+
+    Some local models (Qwen3 family via llama.cpp / LM Studio) emit their
+    reasoning inline in `content`. That text must never reach TTS. Handles
+    tags split across streamed chunks and an unclosed block at EOF.
+    """
+
+    def __init__(self):
+        self._carry = ""
+        self._inside = False
+
+    @staticmethod
+    def _partial_tag_len(buf: str, tag: str) -> int:
+        max_keep = min(len(buf), len(tag) - 1)
+        for k in range(max_keep, 0, -1):
+            if buf.endswith(tag[:k]):
+                return k
+        return 0
+
+    def feed(self, text: str) -> str:
+        buf = self._carry + (text or "")
+        self._carry = ""
+        out = []
+        i = 0
+        while i < len(buf):
+            if not self._inside:
+                j = buf.find(_THINK_OPEN, i)
+                if j == -1:
+                    keep = self._partial_tag_len(buf[i:], _THINK_OPEN)
+                    out.append(buf[i:len(buf) - keep])
+                    self._carry = buf[len(buf) - keep:]
+                    i = len(buf)
+                else:
+                    out.append(buf[i:j])
+                    i = j + len(_THINK_OPEN)
+                    self._inside = True
+            else:
+                j = buf.find(_THINK_CLOSE, i)
+                if j == -1:
+                    keep = self._partial_tag_len(buf[i:], _THINK_CLOSE)
+                    self._carry = buf[len(buf) - keep:]
+                    i = len(buf)
+                else:
+                    i = j + len(_THINK_CLOSE)
+                    self._inside = False
+        return "".join(out)
+
+    def flush(self) -> str:
+        carry = self._carry
+        self._carry = ""
+        return "" if self._inside else carry
+
+
+def _split_for_responses(messages):
+    """Responses API: system -> `instructions`, con lai -> `input` items."""
+    instructions = []
+    input_items = []
+    for m in messages or []:
+        role = m.get("role")
+        content = m.get("content")
+        if role == "system":
+            if content:
+                instructions.append(str(content))
+        else:
+            input_items.append({"role": role, "content": content or ""})
+    return ("\n\n".join(instructions) or None), input_items
+
+
+def _flatten_tools(tools):
+    """Chat Completions dung {type,function:{...}}; Responses API dung phang
+    {type,name,description,parameters}."""
+    out = []
+    for t in tools or []:
+        fn = t.get("function") if isinstance(t, dict) else None
+        if fn:
+            out.append({
+                "type": "function",
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "parameters": fn.get("parameters", {}),
+            })
+        else:
+            out.append(t)  # da o dang phang
+    return out
+
+
 class LlmClient:
     """
     Unified client for:
@@ -52,12 +143,26 @@ class LlmClient:
             "none",
         )
 
+        # ---------- API flavour ----------
+        # chat      = OpenAI-compatible /v1/chat/completions (llama.cpp / Jetson)
+        # responses = OpenAI Responses API /v1/responses (x86 server: tach rieng
+        #             reasoning, tool format phang, co `instructions`)
+        self.api = (
+            os.getenv("LLM_API", "").strip().lower()
+            or str(self.config.get("api", "chat")).strip().lower()
+        )
+
+        # Bat sau lan dau server tu choi stream+tools (xem
+        # stream_chat_completion_with_tools).
+        self._stream_tools_blocked = False
+
         # create client once
         self.client = self._create_client()
 
         logger.info(
-            "LlmClient ready provider=%s model=%s",
+            "LlmClient ready provider=%s api=%s model=%s",
             self.provider,
+            self.api,
             self.model,
         )
 
@@ -93,6 +198,11 @@ class LlmClient:
 
     async def stream_chat_completion(self, messages):
 
+        if self.api == "responses":
+            async for token in self._stream_responses_text(messages):
+                yield token
+            return
+
         t0 = time.perf_counter()
         first_token = None
         token_count = 0
@@ -117,6 +227,7 @@ class LlmClient:
             max_tokens=self.max_tokens,
         )
 
+        stripper = _ThinkStripper()
         async for chunk in stream:
 
             if not chunk.choices:
@@ -125,12 +236,17 @@ class LlmClient:
             delta = chunk.choices[0].delta
 
             if delta and delta.content:
+                text = stripper.feed(delta.content)
+                if text:
+                    if first_token is None:
+                        first_token = time.perf_counter() - t0
 
-                if first_token is None:
-                    first_token = time.perf_counter() - t0
+                    token_count += 1
+                    yield text
 
-                token_count += 1
-                yield delta.content
+        tail = stripper.flush()
+        if tail:
+            yield tail
 
         elapsed = time.perf_counter() - t0
 
@@ -143,6 +259,80 @@ class LlmClient:
             first_token or 0.0,
         )
 
+    async def _stream_responses_text(self, messages):
+        """Responses API, chi text (khong tools) — dung cho cau tra loi cuoi."""
+        t0 = time.perf_counter()
+        first_token = None
+        token_count = 0
+        instructions, input_items = _split_for_responses(messages)
+
+        stream = await self.client.responses.create(
+            model=self.model,
+            instructions=instructions,
+            input=input_items,
+            stream=True,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            max_output_tokens=self.max_tokens,
+        )
+
+        async for event in stream:
+            etype = getattr(event, "type", "")
+            if etype == "response.output_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    if first_token is None:
+                        first_token = time.perf_counter() - t0
+                    token_count += 1
+                    yield delta
+
+        logger.info(
+            "LLM responses stream done provider=%s model=%s tokens=%d total=%.3fs ttft=%.3fs",
+            self.provider,
+            self.model,
+            token_count,
+            time.perf_counter() - t0,
+            first_token or 0.0,
+        )
+
+    async def _responses_with_tools(self, messages, tools):
+        """Responses API voi tools (non-stream): tra ve text + function_call."""
+        t0 = time.perf_counter()
+        instructions, input_items = _split_for_responses(messages)
+        tool_calls_count = 0
+
+        resp = await self.client.responses.create(
+            model=self.model,
+            instructions=instructions,
+            input=input_items,
+            tools=_flatten_tools(tools),
+            tool_choice="auto",
+            max_output_tokens=self.max_tokens,
+        )
+
+        for item in getattr(resp, "output", None) or []:
+            itype = getattr(item, "type", "")
+            if itype == "function_call":
+                tool_calls_count += 1
+                yield ("tool_call", {
+                    "id": getattr(item, "call_id", None) or getattr(item, "id", "") or "",
+                    "name": getattr(item, "name", "") or "",
+                    "arguments": getattr(item, "arguments", "") or "{}",
+                })
+            elif itype == "message":
+                for part in getattr(item, "content", None) or []:
+                    text = getattr(part, "text", "") or ""
+                    if text:
+                        yield ("token", text)
+
+        logger.info(
+            "LLM responses tool call done provider=%s model=%s tool_calls=%d total=%.3fs",
+            self.provider,
+            self.model,
+            tool_calls_count,
+            time.perf_counter() - t0,
+        )
+
     async def stream_chat_completion_with_tools(self, messages, tools=None):
         """
         Stream chat completion with optional tools.
@@ -150,6 +340,11 @@ class LlmClient:
           ("token", token_text)
           ("tool_call", tool_call_dict)
         """
+        if self.api == "responses":
+            async for item in self._responses_with_tools(messages, tools):
+                yield item
+            return
+
         t0 = time.perf_counter()
         first_token = None
         token_count = 0
@@ -165,10 +360,11 @@ class LlmClient:
             except Exception:
                 pass
 
-        # llama.cpp server does not support stream with tools (returns 500 Cannot use tools with stream)
-        use_stream = True
-        if self.provider == "llamacpp" and tools:
-            use_stream = False
+        # Streaming tool calls: current servers stream `tool_calls` deltas fine
+        # (verified: 200 + SSE with tool_call chunks, finish_reason=tool_calls).
+        # Older llama.cpp builds answered 500 "Cannot use tools with stream", so
+        # try streaming first and fall back to non-streaming once if refused.
+        use_stream = not (tools and self._stream_tools_blocked)
 
         kwargs = {
             "model": model,
@@ -181,14 +377,31 @@ class LlmClient:
         if tools:
             kwargs["tools"] = tools
 
-        if not use_stream:
+        stream = None
+        if use_stream:
+            try:
+                stream = await self.client.chat.completions.create(**kwargs)
+            except Exception as e:
+                if not tools:
+                    raise
+                logger.warning(
+                    "stream+tools rejected by server (%s); retrying without stream",
+                    str(e)[:120],
+                )
+                self._stream_tools_blocked = True
+
+        if stream is None:
+            kwargs["stream"] = False
             resp = await self.client.chat.completions.create(**kwargs)
             elapsed = time.perf_counter() - t0
             tool_calls_count = 0
             if resp.choices:
                 msg = resp.choices[0].message
                 if msg.content:
-                    yield ("token", msg.content)
+                    _strip = _ThinkStripper()
+                    text = _strip.feed(msg.content) + _strip.flush()
+                    if text:
+                        yield ("token", text)
                 if msg.tool_calls:
                     tool_calls_count = len(msg.tool_calls)
                     for idx, tc in enumerate(msg.tool_calls):
@@ -206,9 +419,8 @@ class LlmClient:
             )
             return
 
-        stream = await self.client.chat.completions.create(**kwargs)
-
         tool_chunks = {}
+        stripper = _ThinkStripper()
         async for chunk in stream:
             if not chunk.choices:
                 continue
@@ -216,10 +428,12 @@ class LlmClient:
             delta = chunk.choices[0].delta
 
             if delta and delta.content:
-                if first_token is None:
-                    first_token = time.perf_counter() - t0
-                token_count += 1
-                yield ("token", delta.content)
+                text = stripper.feed(delta.content)
+                if text:
+                    if first_token is None:
+                        first_token = time.perf_counter() - t0
+                    token_count += 1
+                    yield ("token", text)
 
             if delta and delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -234,6 +448,10 @@ class LlmClient:
                         tool_chunks[idx]["arguments"] += tc.function.arguments
 
         elapsed = time.perf_counter() - t0
+
+        tail = stripper.flush()
+        if tail:
+            yield ("token", tail)
 
         if tool_chunks:
             for idx in sorted(tool_chunks.keys()):
