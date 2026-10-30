@@ -47,13 +47,14 @@ TOP_FILES = [
 TOP_DIRS = [
     "orchestrator", "agents", "shared", "test", "scripts", "docs",
     "voice_processing", "vendor", "llama-cpp", "cache/orchestrator", "cache/car_manual",
+    "car_control_ui",
 ]
 
 # Directory names skipped anywhere in the tree.
 EXCLUDE_DIR_NAMES = {
     ".git", ".github", ".vscode", ".idea", ".venv", ".venvs", ".venv_docker",
     "__pycache__", ".pytest_cache", ".tox", ".agents", ".codex",
-    "node_modules", "logs", "xet", "stubs", "car_control_ui", "frontend",
+    "node_modules", "logs", "xet", "stubs", "frontend",
 }
 
 # Exact relative directories to skip.
