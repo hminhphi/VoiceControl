@@ -412,3 +412,31 @@ services:
     depends_on:
       orchestrator:
         condition: service_healthy
+
+  # ── Car Control Simulation UI (voice pipeline visualization) ─────
+  car_control_ui:
+    build:
+      context: ./car_control_ui
+      dockerfile: Dockerfile
+    image: orchestrator-on-edge/car_control_ui:latest
+    logging: *default-logging
+    ports:
+      - "8010:8010"
+    environment:
+      - CAR_CONTROL_URL=http://car_control:8001
+      - ORCHESTRATOR_URL=http://orchestrator:8000
+      - CAR_CONTROL_UI_PORT=8010
+      # Panel Voice Lab doc/ghi file nay (mount ben duoi)
+      - ENV_FILE=/app/.env
+      # URL browser-facing; de trong = suy ra tu host cua request
+      - ORCHESTRATOR_PUBLIC_URL=${ORCHESTRATOR_PUBLIC_URL:-}
+      - ./car_control_ui:/app
+      # .env that cua repo -> panel Voice Lab ghi truc tiep
+      - ./.env:/app/.env
+      # Snapshot pipeline (voice_processing -> /api/pipeline)
+      - ./cache/voice_processing:/app/voice_cache:ro
+    depends_on:
+      car_control:
+        condition: service_healthy
+      orchestrator:
+        condition: service_healthy

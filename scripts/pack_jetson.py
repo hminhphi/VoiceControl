@@ -60,6 +60,8 @@ EXCLUDE_DIR_NAMES = {
 EXCLUDE_DIR_REL = {
     "voice_processing/cache", "voice_processing/input_test", "voice_processing/output",
     "voice_processing/wheels",          # build-only wheelhouse (USB jetson-offline/wheels)
+    "voice_processing/vendor/nemo_speech/win",  # dev runtime (Windows); Jetson extracts from the tarball
+    "voice_processing/logs",
     "voice_processing/agent_assets/models/faster_whisper",
     "voice_processing/tools/audio_lab/recordings",
     "voice_processing/torch2trt/build", "voice_processing/torch2trt/dist",
