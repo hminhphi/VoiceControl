@@ -57,7 +57,7 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:8080/v1}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-qwen3.5-4b}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-google/gemma-4-e2b}
       # x86 server: Responses API (/v1/responses) — tool format phang, reasoning
       # tach rieng khoi message. Doi lai "chat" neu chay llama.cpp.
       - LLM_API=${LLM_API:-responses}
@@ -269,8 +269,22 @@ services:
       - VAD_THRESHOLD_HIGH=${VAD_THRESHOLD_HIGH:-0.55}
       - VAD_THRESHOLD_LOW=${VAD_THRESHOLD_LOW:-0.20}
       # Turn-taking (pause chốt segment / kết thúc turn)
-      - SEGMENT_SILENCE=${SEGMENT_SILENCE:-1.0}
-      - TURN_END_SILENCE=${TURN_END_SILENCE:-2.5}
+      - SEGMENT_SILENCE=${SEGMENT_SILENCE:-0.8}
+      - TURN_END_SILENCE=${TURN_END_SILENCE:-1.2}
+      - SMART_TURN_ENABLED=${SMART_TURN_ENABLED:-1}
+      - SMART_TURN_THRESHOLD=${SMART_TURN_THRESHOLD:-0.35}
+      - SMART_TURN_EXTEND_SEC=${SMART_TURN_EXTEND_SEC:-1.5}
+      - SMART_TURN_MAX_EXTEND_SEC=${SMART_TURN_MAX_EXTEND_SEC:-3.0}
+      - STT_PARTIAL_ENABLED=${STT_PARTIAL_ENABLED:-1}
+      - STT_PARTIAL_MIN_SEC=${STT_PARTIAL_MIN_SEC:-2.0}
+      - STT_PARTIAL_WINDOW_SEC=${STT_PARTIAL_WINDOW_SEC:-6.0}
+      - STT_PARTIAL_INTERVAL=${STT_PARTIAL_INTERVAL:-0.55}
+      - NEMO_DIAR_ENABLED=${NEMO_DIAR_ENABLED:-1}
+      - NEMO_SPEECH_BIN=${NEMO_SPEECH_BIN:-}
+      - NEMO_SPEECH_DIAR_MODEL=${NEMO_SPEECH_DIAR_MODEL:-nemotron-3-diarization}
+      - NEMO_DIAR_DEVICE=${NEMO_DIAR_DEVICE:-cpu}
+      - SPEAKER_ID_ENABLED=${SPEAKER_ID_ENABLED:-1}
+      - SPEAKER_ID_THRESHOLD=${SPEAKER_ID_THRESHOLD:-0.65}
       - VAD_FIRST_TIMEOUT=${VAD_FIRST_TIMEOUT:-8.0}
       - VAD_DETECT_THRESHOLD=${VAD_DETECT_THRESHOLD:-0.55}
       # Số frame liên tiếp (32ms/frame) đủ để bắt đầu speech (3 = 96ms)
@@ -359,6 +373,8 @@ services:
       - ./car_control_ui:/app
       # .env that cua repo -> panel Voice Lab ghi truc tiep
       - ./.env:/app/.env
+      # Snapshot pipeline (voice_processing -> /api/pipeline)
+      - ./cache/voice_processing:/app/voice_cache:ro
     depends_on:
       car_control:
         condition: service_healthy

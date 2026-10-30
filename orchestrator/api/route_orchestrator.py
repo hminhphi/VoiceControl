@@ -1,6 +1,7 @@
 import logging
 import json
 import re
+import time
 
 import asyncio
 from datetime import datetime, timezone, timedelta
@@ -16,6 +17,7 @@ def _get_local_now() -> datetime:
         return datetime.now(LOCAL_TZ)
 
 
+import httpx
 from fastapi import APIRouter, HTTPException, WebSocket
 from pydantic import BaseModel
  
@@ -79,6 +81,8 @@ class MessageRequest(BaseModel):
     message: str
     session_id: str = "default"
     language: str | None = None  # STT-detected language hint (en/ja/vi/ko/zh)
+    # Streaming diarization result for this turn (speaker slot, overlap, ...).
+    speaker: dict | None = None
  
  
 class AgentResponse(BaseModel):
@@ -374,14 +378,25 @@ def _turn2_lang_instruction(user_lang: str) -> str:
     return "Answer concisely in English in 1-2 friendly sentences."
 
 
-async def _stream_turn2(session_id: str, turn2_messages: list) -> str:
-    """Stream the LLM Turn-2 synthesis and return the full reply text."""
+async def _stream_turn2(
+    session_id: str, turn2_messages: list, single_sentence: bool = False
+) -> str:
+    """Stream the LLM Turn-2 synthesis and return the full reply text.
+
+    With `single_sentence` (control_car path) the stream is cut right after the
+    first sentence: gemma tends to append filler like "Everything is now
+    secured", which only lengthens the TTS reply.
+    """
     full_text = ""
     async for token in llm_client.stream_chat_completion(turn2_messages):
         full_text += token
         await _send_to_session_and_frontend(
             session_id, {"type": "token", "content": token}
         )
+        if single_sentence:
+            trimmed = full_text.strip()
+            if len(trimmed) > 24 and trimmed[-1] in ".!?。！？":
+                break
     return full_text
 
 
@@ -450,7 +465,61 @@ def _normalize_car_actions(fn_args: dict) -> list[tuple[str, str]]:
 
 
 
-async def process_request_tool_calling(session_id: str, user_message: str, language: str | None = None):
+_CAR_STATE_CACHE = {"at": 0.0, "text": ""}
+
+
+async def _car_state_hint() -> str:
+    """One-line live car state for disambiguation (the door, when one is open)."""
+    url = registry.get_url("car_control")
+    if not url:
+        return ""
+    now = time.time()
+    if now - _CAR_STATE_CACHE["at"] < 2.0:
+        return _CAR_STATE_CACHE["text"]
+    text = ""
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as c:
+            r = await c.get(url.rstrip('/') + '/state')
+        d = r.json()
+        flag = lambda k, on, off: on if d.get(k) else off
+        text = (
+            "Car state (current): door "
+            + flag("door_open", "OPEN (one door open)", "all closed")
+            + ", trunk " + flag("trunk_open", "open", "closed")
+            + ", window " + flag("window_open", "open", "closed")
+            + ", light " + flag("light_on", "on", "off")
+            + ", ac " + flag("ac_on", "on", "off")
+            + "."
+        )
+    except Exception:
+        text = ""
+    _CAR_STATE_CACHE["at"] = now
+    _CAR_STATE_CACHE["text"] = text
+    return text
+
+
+_DOOR_SITE_RE = re.compile(
+    r"left door|cửa trái|左ドア|right door|cửa phải|右ドア", re.IGNORECASE
+)
+
+
+def _recent_parts_hint(session_id: str) -> str:
+    """The door or part the user last touched in this session (last door)."""
+    try:
+        messages = context_store.get_recent(session_id, "llm_orchestrator")
+    except Exception:
+        return ""
+    for message in reversed(messages):
+        content = message.get("content") if isinstance(message.get("content"), str) else ""
+        if not content:
+            continue
+        match = _DOOR_SITE_RE.search(content)
+        if match:
+            return f"User last touched: {match.group(0).lower()}."
+    return ""
+
+
+async def process_request_tool_calling(session_id: str, user_message: str, language: str | None = None, speaker: dict | None = None):
     logger.info("Processing tool-calling request session_id=%s, message=%r", session_id, user_message)
 
     # ── STT auto-correction before any routing/LLM ──────────────────
@@ -467,6 +536,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 "session_id": session_id,
                 "content": user_message,
                 "agent_ids": ["llm_orchestrator"],
+                "speaker": speaker,
             },
         )
 
@@ -493,6 +563,28 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
         if not history or history[-1].get("content") != user_message:
             history = [*history, {"role": "user", "content": user_message}]
 
+        # Who is talking (streaming diarization). Lets the reply address the
+        # right person and helps when several people speak in a meeting room.
+        speaker_hint = ""
+        if speaker:
+            slot = speaker.get("speaker")
+            label = speaker.get("label") or (
+                f"Speaker {int(slot) + 1}" if isinstance(slot, int) else "unknown speaker"
+            )
+            extras = []
+            others = speaker.get("speakers") or []
+            if len(others) > 1:
+                extras.append(f"{len(others)} people talking")
+            if (speaker.get("overlap_ratio") or 0) >= 0.15:
+                extras.append(f"overlap {speaker['overlap_ratio']:.2f}")
+            speaker_hint = f"\nActive speaker: {label}"
+            if extras:
+                speaker_hint += " (" + ", ".join(extras) + ")"
+        car_hint = await _car_state_hint()
+        recent_hint = _recent_parts_hint(session_id)
+        if car_hint or recent_hint:
+            speaker_hint += car_hint + recent_hint
+
         messages = [
             {
                 "role": "system",
@@ -500,6 +592,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                     f"{DORA_TOOL_SYSTEM_PROMPT}\n\n"
                     f"{_language_directive(user_lang)}\n\n"
                     f"Context:\nCurrent local time and date: {now_str}"
+                    f"{speaker_hint}"
                 ),
             },
             *history,
@@ -644,7 +737,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
                 },
             ]
 
-            full_turn2_text = await _stream_turn2(session_id, turn2_messages)
+            full_turn2_text = await _stream_turn2(session_id, turn2_messages, single_sentence=True)
             if not full_turn2_text.strip():
                 fallback_msg = _generate_natural_fallback(user_message, [agent_res])
                 await _send_to_session_and_frontend(session_id, {"type": "token", "content": fallback_msg})
@@ -751,7 +844,7 @@ async def process_request_tool_calling(session_id: str, user_message: str, langu
 @router.post("/message", response_model=MessageAccepted)
 @timeit
 async def post_message(req: MessageRequest):
-    logger.info(f"Received message request: session_id={req.session_id}, message='{req.message}'")
+    logger.info(f"Received message request: session_id={req.session_id}, message='{req.message}', speaker={req.speaker}")
     user_message = (req.message or "").strip()
     session_id = req.session_id or "default"
  
@@ -772,7 +865,7 @@ async def post_message(req: MessageRequest):
     # Pure LLM Tool-Calling background task
     logger.info(f"Starting background tool-calling task for session_id={session_id}")
     asyncio.create_task(
-        process_request_tool_calling(session_id, user_message, req.language)
+        process_request_tool_calling(session_id, user_message, req.language, req.speaker)
     )
  
     return MessageAccepted(

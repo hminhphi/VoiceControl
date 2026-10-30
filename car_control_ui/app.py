@@ -37,6 +37,9 @@ ORCHESTRATOR_PUBLIC_URL = os.environ.get("ORCHESTRATOR_PUBLIC_URL", "").strip()
 # File .env de panel voice lab doc/ghi (mount tu repo).
 ENV_FILE = os.environ.get("ENV_FILE", "/app/.env")
 
+# Snapshot JSON do voice_processing ghi (xem pipeline_state.py) — mount read-only.
+VOICE_STATE_FILE = os.environ.get("VOICE_STATE_FILE", "/app/voice_cache/pipeline_state.json")
+
 # Cac khoa tien xu ly am thanh hien trong panel Voice Lab.
 VOICE_KEYS = [
     "AEC_NS_LEVEL",
@@ -92,6 +95,20 @@ async def proxy_state():
             return JSONResponse(r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=503)
+
+
+@app.get("/api/pipeline")
+async def pipeline_state():
+    """Live pipeline snapshot written by voice_processing (10 Hz)."""
+    try:
+        with open(VOICE_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data["available"] = True
+        return JSONResponse(data)
+    except FileNotFoundError:
+        return JSONResponse({"available": False, "reason": "no snapshot yet - is voice_processing running?"})
+    except Exception as e:
+        return JSONResponse({"available": False, "reason": str(e)})
 
 
 @app.post("/api/control")

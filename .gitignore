@@ -94,3 +94,8 @@ Thumbs.db
 # apt .debs cho build offline (không lên git, nhưng pack_jetson vẫn đóng zip)
 vendor/apt-debs/*.deb
 voice_processing/agent_assets/models/supertonic-3/
+# voice stack: model binaries + vendored runtimes
+voice_processing/agent_assets/models/nemo/
+voice_processing/agent_assets/models/speaker/
+voice_processing/agent_assets/models/smart-turn/
+voice_processing/vendor/

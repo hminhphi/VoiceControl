@@ -214,13 +214,26 @@ function Start-VoiceHost {
         $lines += "`$env:AEC_LIMITER_KNEE = '0.7'"
         $lines += "`$env:BARGE_IN_ENABLED = '0'"
         $lines += "`$env:BARGE_IN_MIN_PLAY_SEC = '1.0'"
-        $lines += "`$env:SEGMENT_SILENCE = '1.0'"
-        $lines += "`$env:TURN_END_SILENCE = '2.5'"
+        $lines += "`$env:SEGMENT_SILENCE = '0.8'"
+        $lines += "`$env:TURN_END_SILENCE = '1.2'"
         $lines += "`$env:VAD_FIRST_TIMEOUT = '8.0'"
         # 6 frame liên tiếp (192ms) mới tính speech — chống click/pop kích hoạt oan
         $lines += "`$env:VAD_WINDOW_SIZE = '3'"
         $lines += "`$env:FOLLOWUP_LISTEN_SEC = '12.0'"
+        # Semantic end-of-turn (Smart Turn v3.2) + diarization/identity env.
         $lines += "`$env:FOLLOWUP_GRACE_SEC = '0.2'"
+        $lines += "`$env:SMART_TURN_ENABLED = '1'"
+        $lines += "`$env:SMART_TURN_THRESHOLD = '0.35'"
+        $lines += "`$env:SMART_TURN_EXTEND_SEC = '1.5'"
+        $lines += "`$env:SMART_TURN_MAX_EXTEND_SEC = '3.0'"
+        $lines += "`$env:NEMO_DIAR_ENABLED = '1'"
+        $lines += "`$env:NEMO_DIAR_DEVICE = 'cpu'"
+        $lines += "`$env:SPEAKER_ID_ENABLED = '1'"
+        $lines += "`$env:SPEAKER_ID_THRESHOLD = '0.65'"
+        $lines += "`$env:STT_PARTIAL_ENABLED = '1'"
+        $lines += "`$env:STT_PARTIAL_MIN_SEC = '2.0'"
+        $lines += "`$env:STT_PARTIAL_WINDOW_SEC = '6.0'"
+        $lines += "`$env:STT_PARTIAL_INTERVAL = '0.55'"
         $lines += "`$env:SPEECH_PREROLL_SEC = '0.8'"
         $lines += "Set-Location '$VOICE_DIR'"
         $lines += "Write-Host '==================================================' -ForegroundColor Cyan"
@@ -560,7 +573,7 @@ Start-ServiceWindow -Name "orchestrator" `
     -ExtraEnv @{
         ORCHESTRATOR_PORT  = "$PORT_ORCH"
         HF_HOME            = (Join-Path $ORCH_DIR "cache")
-        LOCAL_LLM_URL      = "http://localhost:8081/v1"
+        LOCAL_LLM_URL      = "http://localhost:8080/v1"
         LOCAL_LLM_MODEL    = if ($env:LOCAL_LLM_MODEL) { $env:LOCAL_LLM_MODEL } else { "google/gemma-4-e2b" }
         GRAPHQL_HOST       = ""
     }
@@ -582,6 +595,8 @@ if (-not $SkipUI) {
             CAR_CONTROL_URL      = "http://localhost:$PORT_CC"
             ORCHESTRATOR_URL     = "http://localhost:$PORT_ORCH"
             CAR_CONTROL_UI_PORT  = "$PORT_UI"
+            # Snapshot pipeline ghi boi voice_processing (panel Realtime Pipeline).
+            VOICE_STATE_FILE     = '.\cache\voice_processing\pipeline_state.json'
         }
 
     [void](Wait-ForHealthHost "http://localhost:$PORT_UI/health" "car_control_ui" 20 2)

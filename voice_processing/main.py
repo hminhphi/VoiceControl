@@ -42,6 +42,10 @@ from audio_utils import (
 from notification_sounds import play_into_queue as play_notification
 from wake_word import WakeWordProcessor
 from vad import VADProcessor
+from smart_turn import detect_turn_complete
+from nemo_diar import get_diarizer
+from speaker_id import get_identifier, rollcall_name
+from pipeline_state import get_state
 from stt import STTProcessor
 from tts import TTSProcessor
 from lang import detect_lang
@@ -80,6 +84,13 @@ def _env_float(name, default, minimum=0.0):
         return default
 
 
+def _env_bool(name, default=False):
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _audio_latency_from_env(name, default="high"):
     raw = os.environ.get(name, default).strip().lower()
     if raw in ("low", "high"):
@@ -103,8 +114,26 @@ AUDIO_LEVEL_LOG_INTERVAL = _env_float("AUDIO_LEVEL_LOG_INTERVAL", 1)
 AUDIO_MIC_LOG_DBFS = _env_float("AUDIO_MIC_LOG_DBFS", -50.0, minimum=-120.0)
 AUDIO_SPK_LOG_DBFS = _env_float("AUDIO_SPK_LOG_DBFS", -60.0, minimum=-120.0)
 VAD_FIRST_TIMEOUT = _env_float("VAD_FIRST_TIMEOUT", 8.0)
-SEGMENT_SILENCE = _env_float("SEGMENT_SILENCE", 1.0)
-TURN_END_SILENCE = _env_float("TURN_END_SILENCE", 2.5)
+# Smart-Turn vetoes premature cuts, so the tails can be short.
+SEGMENT_SILENCE = _env_float("SEGMENT_SILENCE", 0.8)
+TURN_END_SILENCE = _env_float("TURN_END_SILENCE", 1.2)
+# Semantic end-of-turn (Smart Turn v3.2): when the silence timer would end the
+# turn, ask the model whether the speaker actually finished. If it says
+# "still speaking" (prob < threshold), keep listening for a bit instead of
+# cutting the user off.
+SMART_TURN_ENABLED = _env_bool("SMART_TURN_ENABLED", True)
+SMART_TURN_THRESHOLD = _env_float("SMART_TURN_THRESHOLD", 0.35)
+SMART_TURN_EXTEND_SEC = _env_float("SMART_TURN_EXTEND_SEC", 1.5)
+SMART_TURN_MAX_EXTEND_SEC = _env_float("SMART_TURN_MAX_EXTEND_SEC", 3.0)
+# Streaming STT partials: transcribe the rolling window mid-speech so the
+# UI shows a live transcript while the user is still talking.
+STT_PARTIAL_ENABLED = _env_bool("STT_PARTIAL_ENABLED", True)
+STT_PARTIAL_MIN_SEC = _env_float("STT_PARTIAL_MIN_SEC", 2.0)
+STT_PARTIAL_WINDOW_SEC = _env_float("STT_PARTIAL_WINDOW_SEC", 6.0)
+STT_PARTIAL_INTERVAL = _env_float("STT_PARTIAL_INTERVAL", 0.55)
+# Per-turn diarization (Nemotron-3-Diarization) + cross-turn voiceprint id.
+NEMO_DIAR_ENABLED = _env_bool("NEMO_DIAR_ENABLED", False)
+SPEAKER_ID_ENABLED = _env_bool("SPEAKER_ID_ENABLED", False)
 MIN_SEGMENT_SEC = _env_float("MIN_SEGMENT_SEC", 0.095)
 SPEECH_PREROLL_SEC = _env_float("SPEECH_PREROLL_SEC", 0.8)
 LISTENING_GRACE_SEC = _env_float("LISTENING_GRACE_SEC", 0.45)
@@ -248,6 +277,19 @@ def run():
 
     ww = WakeWordProcessor(DEVICE_SAMPLE_RATE)
     vad = VADProcessor(DEVICE_SAMPLE_RATE)
+    if NEMO_DIAR_ENABLED:
+        get_diarizer()
+    if SPEAKER_ID_ENABLED:
+        get_identifier()
+    state = get_state()
+    state.update(
+        "vad",
+        threshold=VAD_DETECT_THRESHOLD,
+        window=int(os.environ.get("VAD_WINDOW_SIZE", "3")),
+    )
+    state.update("diar", enabled=NEMO_DIAR_ENABLED)
+    state.update("identity", label=None, score=None)
+    state.update("smart_turn", threshold=SMART_TURN_THRESHOLD, prob=None)
     # Leave STT_LANGUAGE/STT_LANG empty to let Whisper auto-detect. STT_MODEL
     # defaults to small.en for English-only commands.
     stt_lang = os.environ.get("STT_LANGUAGE") or os.environ.get("STT_LANG") or None
@@ -288,9 +330,18 @@ def run():
     pending_turn = False
     collected_speech = np.array([], dtype=np.int16)
     pre_speech_audio = np.array([], dtype=np.int16)
+    # Smart-Turn: rolling last-8 s buffer (float32) + extension bookkeeping.
+    turn_tail_audio = np.array([], dtype=np.float32)
+    smart_hold_until = 0.0
+    smart_extended_total = 0.0
+    # STT partial protocol (audio thread -> STT thread)
+    stt_partial_wave = None
+    stt_partial_pending = False
+    stt_partial_due_at = 0.0
     ignore_audio_until = 0.0
     last_wake_word_time = 0.0
     last_vad_print_time = 0.0
+    last_state_vad_ts = 0.0
     is_tts_playing = False
     # Follow-up conversation window (no wake-word needed after a TTS reply).
     followup_until = None
@@ -370,7 +421,7 @@ def run():
                     last_input_status_log = event_time
 
     def process_audio():
-        nonlocal ww_detected, vad_detected_once, timeout_at, last_voice_time, pending_turn, collected_speech, pre_speech_audio, ignore_audio_until, last_wake_word_time, last_vad_print_time, is_tts_playing, followup_until, active_session_id, turn_gen, tts_play_start
+        nonlocal ww_detected, vad_detected_once, timeout_at, last_voice_time, pending_turn, collected_speech, pre_speech_audio, ignore_audio_until, last_wake_word_time, last_vad_print_time, is_tts_playing, followup_until, active_session_id, turn_gen, tts_play_start, turn_tail_audio, smart_hold_until, smart_extended_total, stt_partial_wave, stt_partial_pending, stt_partial_due_at, last_state_vad_ts
 
         print(f"[audio][thread] process_audio_tid={get_native_id()}", flush=True)
         while not stop.is_set():
@@ -407,11 +458,16 @@ def run():
                             )
                         ww_detected = True
                         timeout_at = now + VAD_FIRST_TIMEOUT
+                        state.update("wake", detected=True, listening=True)
+                        state.event("wake", at=round(now, 2))
                         vad_detected_once = False
                         last_voice_time = None
                         pending_turn = False
                         collected_speech = np.array([], dtype=np.int16)
                         pre_speech_audio = np.array([], dtype=np.int16)
+                        turn_tail_audio = np.array([], dtype=np.float32)
+                        smart_hold_until = 0.0
+                        smart_extended_total = 0.0
                         ignore_audio_until = now + LISTENING_GRACE_SEC
                         vad.empty_buffer()
                         # Fresh wake-word starts a new conversation.
@@ -438,6 +494,9 @@ def run():
                             pending_turn = False
                             collected_speech = np.array([], dtype=np.int16)
                             pre_speech_audio = np.array([], dtype=np.int16)
+                            turn_tail_audio = np.array([], dtype=np.float32)
+                            smart_hold_until = 0.0
+                            smart_extended_total = 0.0
                             ignore_audio_until = now + FOLLOWUP_GRACE_SEC
                             vad.empty_buffer()
                             print(
@@ -452,6 +511,9 @@ def run():
                             )
                     if ww_detected and now >= ignore_audio_until:
                         vad.update_buffer(chunk.tobytes())
+                        turn_tail_audio = np.concatenate(
+                            (turn_tail_audio, chunk.astype(np.float32) / 32768.0)
+                        )[-8 * DEVICE_SAMPLE_RATE:]
                         if vad_detected_once:
                             collected_speech = np.concatenate((collected_speech, chunk))
                         else:
@@ -469,6 +531,12 @@ def run():
                     if len(pre_speech_audio) > max_preroll:
                         pre_speech_audio = pre_speech_audio[-max_preroll:]
                     p = max(vad.process_all() or [vad.get_prob()])
+                    if now - last_state_vad_ts >= 0.15:
+                        last_state_vad_ts = now
+                        state.update(
+                            "vad", prob=round(float(p), 3),
+                            speech=bool(vad.is_speech()),
+                        )
                     if p > VAD_LOG_THRESHOLD and (now - last_vad_print_time) >= VAD_LOG_INTERVAL:
                         print(f"[VAD][barge] prob={p:.3f} threshold={VAD_DETECT_THRESHOLD:.3f}")
                         last_vad_print_time = now
@@ -493,6 +561,8 @@ def run():
                         )
                         ww_detected = True
                         timeout_at = now + VAD_FIRST_TIMEOUT
+                        state.update("wake", detected=True, listening=True)
+                        state.event("wake", at=round(now, 2))
                         # VAD is already hot and speech is ongoing: the new
                         # turn starts mid-speech with onset kept from pre-roll.
                         vad_detected_once = True
@@ -500,6 +570,9 @@ def run():
                         pending_turn = False
                         collected_speech = pre_speech_audio.copy()
                         pre_speech_audio = np.array([], dtype=np.int16)
+                        turn_tail_audio = np.array([], dtype=np.float32)
+                        smart_hold_until = 0.0
+                        smart_extended_total = 0.0
                         ignore_audio_until = now
                         is_tts_playing = False
                         tts_play_start = None
@@ -507,6 +580,12 @@ def run():
 
                 if ww_detected:
                     p = max(vad.process_all() or [vad.get_prob()])
+                    if now - last_state_vad_ts >= 0.15:
+                        last_state_vad_ts = now
+                        state.update(
+                            "vad", prob=round(float(p), 3),
+                            speech=bool(vad.is_speech()),
+                        )
                     if p > VAD_LOG_THRESHOLD and (now - last_vad_print_time) >= VAD_LOG_INTERVAL:
                         print(f"[VAD] prob={p:.3f} threshold={VAD_DETECT_THRESHOLD:.3f}")
                         last_vad_print_time = now
@@ -518,12 +597,55 @@ def run():
                             vad_detected_once = True
                             collected_speech = pre_speech_audio.copy()
                             print("[VAD] Speech start; capturing command")
+                            state.update("stt", state="listening", text="")
+                            state.event("speech_start")
                         last_voice_time = now
+                        # Speech is ongoing: drop any Smart-Turn extension.
+                        smart_hold_until = 0.0
+                        smart_extended_total = 0.0
+                        if (
+                            STT_PARTIAL_ENABLED
+                            and now >= stt_partial_due_at
+                            and not stt_partial_pending
+                            and len(collected_speech) >= STT_PARTIAL_MIN_SEC * DEVICE_SAMPLE_RATE
+                        ):
+                            stt_partial_wave = collected_speech[
+                                -int(STT_PARTIAL_WINDOW_SEC * DEVICE_SAMPLE_RATE):
+                            ].copy()
+                            stt_partial_pending = True
+                            stt_partial_due_at = now + STT_PARTIAL_INTERVAL
 
                 if last_voice_time is not None:
                     segment_at = last_voice_time + SEGMENT_SILENCE
                     turn_end_at = last_voice_time + TURN_END_SILENCE
-                    if pending_turn and now >= turn_end_at:
+                    if pending_turn and now >= turn_end_at and now >= smart_hold_until:
+                        # Semantic end-of-turn: if the model says the speaker has
+                        # not finished (prob < threshold), keep listening instead
+                        # of ending the turn on the silence timer.
+                        if SMART_TURN_ENABLED and len(turn_tail_audio) >= DEVICE_SAMPLE_RATE // 2:
+                            prob = None
+                            try:
+                                prob = detect_turn_complete(turn_tail_audio)
+                            except Exception as e:
+                                print(f"[SMART-TURN][error] {e}", flush=True)
+                            if (
+                                prob is not None
+                                and prob < SMART_TURN_THRESHOLD
+                                and smart_extended_total < SMART_TURN_MAX_EXTEND_SEC
+                            ):
+                                state.update(
+                                    "smart_turn", prob=round(prob, 3),
+                                    decision="extend",
+                                )
+                                state.event("smart_turn", prob=round(prob, 3), decision="extend")
+                                smart_extended_total += SMART_TURN_EXTEND_SEC
+                                smart_hold_until = now + SMART_TURN_EXTEND_SEC
+                                print(
+                                    f"[SMART-TURN] incomplete prob={prob:.3f} < "
+                                    f"{SMART_TURN_THRESHOLD:.2f} -> keep listening "
+                                    f"(+{SMART_TURN_EXTEND_SEC:.1f}s)"
+                                )
+                                continue
                         # Consume the follow-up trigger BEFORE handing the turn
                         # to STT: on an empty turn process_stt re-arms it, and
                         # this clear must not race/overwrite that re-arm.
@@ -536,12 +658,19 @@ def run():
                         # khi STT that su co text (xem process_stt) - neu STT tra
                         # rong thi khong gui, khong phat tieng "sending".
                         print("[TURN] End of speech; finalizing transcript")
+                        state.update("wake", listening=False)
+                        state.update("stt", state="transcribing")
+                        state.update("smart_turn", decision="complete")
+                        state.event("speech_end")
                         ww_detected = False
                         timeout_at = None
                         last_voice_time = None
                         pending_turn = False
                         collected_speech = np.array([], dtype=np.int16)
                         pre_speech_audio = np.array([], dtype=np.int16)
+                        turn_tail_audio = np.array([], dtype=np.float32)
+                        smart_hold_until = 0.0
+                        smart_extended_total = 0.0
                     elif now >= segment_at and len(collected_speech) > 0:
                         dur = len(collected_speech) / DEVICE_SAMPLE_RATE
                         if dur >= MIN_SEGMENT_SEC:
@@ -602,7 +731,7 @@ def run():
                 time.sleep(0.1)
 
     def process_stt():
-        nonlocal ignore_audio_until, is_tts_playing, followup_until, active_session_id, tts_play_start
+        nonlocal ignore_audio_until, is_tts_playing, followup_until, active_session_id, tts_play_start, stt_partial_wave, stt_partial_pending
         print(f"[audio][thread] process_stt_tid={get_native_id()}", flush=True)
         turn_texts = []
         turn_lang = None
@@ -611,7 +740,9 @@ def run():
         buf_gen = None
         while not stop.is_set():
             try:
-                item_gen, item = stt_queue.get(timeout=1.0)
+                item_gen, item = stt_queue.get(timeout=0.25)
+                stt_partial_wave = None
+                stt_partial_pending = False
                 if item_gen != turn_gen:
                     # Segment queued before a barge-in / wake-word interrupt
                     # belongs to a superseded turn: drop it.
@@ -646,10 +777,89 @@ def run():
                         continue
                     lang = turn_lang
                     print(f"[TURN] Transcript ready: {text!r} lang={lang}")
-                    # ── Speaker overlap / TSE / gate (opt-in, GPU) ──
-                    if (SPEAKER_ENABLED or SPEAKER_TSE_ENABLED) and turn_audio_parts:
+                    state.update("stt", state="idle", text=text)
+                    state.update("wake", detected=False, listening=False)
+                    state.set_turn(gen=turn_gen, text=text, lang=lang)
+                    state.bump_turn()
+                    state.event("turn", text=text, lang=lang)
+                    # ── Speakers: Nemotron diarization + voiceprint identity ──
+                    wav16 = None
+                    if turn_audio_parts:
+                        wav16 = _to_f32_16k(
+                            _concat_int16(turn_audio_parts), DEVICE_SAMPLE_RATE
+                        )
+                    diar_info = None
+                    if (NEMO_DIAR_ENABLED or SPEAKER_ID_ENABLED) and wav16 is not None:
                         try:
-                            wav16 = _to_f32_16k(_concat_int16(turn_audio_parts), DEVICE_SAMPLE_RATE)
+                            diar_info = {}
+                            if NEMO_DIAR_ENABLED:
+                                den = get_diarizer().analyze(wav16)
+                                if den:
+                                    diar_info.update(den)
+                                    print(
+                                        f"[DIAR] speakers={den['n_speakers']} "
+                                        f"overlap={den['overlap_ratio']:.2f} "
+                                        f"speech={den['speech_ratio']:.2f} "
+                                        f"latency={den['latency_ms']:.0f}ms",
+                                        flush=True,
+                                    )
+                                    state.update(
+                                        "diar",
+                                        n_speakers=den["n_speakers"],
+                                        overlap_ratio=den["overlap_ratio"],
+                                        latency_ms=den["latency_ms"],
+                                    )
+                                    state.event(
+                                        "diar",
+                                        n_speakers=den["n_speakers"],
+                                        overlap=den["overlap_ratio"],
+                                    )
+                            if SPEAKER_ID_ENABLED:
+                                ident = get_identifier().identify(wav16)
+                                if ident:
+                                    diar_info.update(ident)
+                                    print(
+                                        f"[SPK-ID] {ident['label']} "
+                                        f"score={ident['score']:.2f} "
+                                        f"{'new' if ident['is_new'] else 'known'} "
+                                        f"({ident['known_speakers']} known)",
+                                        flush=True,
+                                    )
+                                    state.update(
+                                        "identity",
+                                        label=ident["label"],
+                                        score=ident["score"],
+                                        known=ident["known_speakers"],
+                                    )
+                                    state.event(
+                                        "identity",
+                                        label=ident["label"],
+                                        score=ident["score"],
+                                        is_new=ident["is_new"],
+                                    )
+                            if not diar_info:
+                                diar_info = None
+                            else:
+                                state.set_turn(speaker=diar_info.get("label"))
+                                # Voiceprint + roll call: label the slot with a name
+                                # the moment the user introduces themselves.
+                                if SPEAKER_ID_ENABLED and diar_info.get("label"):
+                                    new_name = rollcall_name(text)
+                                    if new_name and get_identifier().rename(
+                                        diar_info["label"], new_name
+                                    ):
+                                        diar_info["label"] = new_name
+                                        state.set_turn(speaker=new_name)
+                                        state.event("rollcall", label=new_name)
+                                        print(
+                                            f"[SPK-ID] rollcall -> {new_name}",
+                                            flush=True,
+                                        )
+                        except Exception as e:
+                            print(f"[DIAR][error] {e}", flush=True)
+                    # ── Speaker overlap / TSE / gate (opt-in, GPU) ──
+                    if (SPEAKER_ENABLED or SPEAKER_TSE_ENABLED) and wav16 is not None:
+                        try:
                             res = None
                             analyzer = get_analyzer() if SPEAKER_ENABLED else None
                             if analyzer is not None:
@@ -721,6 +931,14 @@ def run():
                         f"lang={seg_lang}"
                         + (f" drop={drop_reason}" if not part else "")
                     )
+                    state.update(
+                        "stt",
+                        state="transcribing",
+                        text=(part or "")[-160:],
+                        lang=seg_lang,
+                        latency_ms=round((time.time() - t0) * 1000, 1),
+                        drop_reason=(drop_reason if not part else None),
+                    )
                     continue
                 if not text:
                     continue
@@ -735,18 +953,18 @@ def run():
                     # is bumped and this turn's late segments are dropped.
                     req_gen = turn_gen
                     print(f"[ORCH] Sending transcript session={session_id}: {text!r}")
-                    play_notification(
-                        "sending",
-                        output_queue,
-                        CHUNK,
-                        DEVICE_SAMPLE_RATE,
-                    )
+                    state.update("llm", state="thinking", chars=0)
+                    state.event("llm", state="thinking")
+                    # No beep: the beep itself added latency to the first reply.
                     is_tts_playing = True
                     tts_play_start = time.time()
                     abort_reply.clear()
                     try:
                         def on_segment(segment, _rg=req_gen):
                             print(f"[ORCH] Response segment: {segment!r}")
+                            state.update("llm", state="speaking", chars=len(segment))
+                            state.update("tts", speaking=True, text=segment[-160:])
+                            state.event("reply", text=segment[-160:])
                             # Non-blocking: TTS worker synthesizes while the
                             # WS loop keeps receiving LLM tokens.
                             tts_text_queue.put((_rg, segment, tts_lang))
@@ -757,6 +975,7 @@ def run():
                             n_chunks=TTS_CHUNK_COUNT,
                             language=lang,
                             abort_event=abort_reply,
+                            speaker=diar_info,
                         )
                         if req_gen == turn_gen:
                             # Wait until every queued segment is synthesized,
@@ -770,6 +989,8 @@ def run():
                     finally:
                         is_tts_playing = False
                         tts_play_start = None
+                        state.update("llm", state="idle")
+                        state.update("tts", speaking=False)
                         if req_gen != turn_gen:
                             # Superseded by a barge-in: the interrupting turn
                             # owns the conversation now; don't re-arm here.
@@ -795,6 +1016,30 @@ def run():
                         device_sample_rate=DEVICE_SAMPLE_RATE,
                     )
             except queue.Empty:
+                # Queue idle + speech ongoing -> live partial transcript
+                # for the UI (throttled by the audio thread). Only final
+                # segments feed turn_texts.
+                if not (STT_PARTIAL_ENABLED and stt_partial_pending and stt_partial_wave is not None):
+                    continue
+                wave = stt_partial_wave
+                stt_partial_wave = None
+                stt_partial_pending = False
+                try:
+                    t0p = time.time()
+                    outp = stt.transcribe(wave)
+                    textp = (outp.get("text") or "").strip()
+                    if textp:
+                        state.update(
+                            "stt",
+                            state="listening",
+                            text=textp[-160:],
+                            lang=outp.get("language") or None,
+                            latency_ms=round((time.time() - t0p) * 1000, 1),
+                        )
+                        state.event("partial", text=textp[-120:])
+                        print(f"[STT][partial] {textp!r}", flush=True)
+                except Exception as e:
+                    print(f"[STT][partial][error] {e}", flush=True)
                 continue
             except Exception as e:
                 print(f"[STT][error] {type(e).__name__}: {e}", flush=True)

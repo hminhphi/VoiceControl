@@ -29,6 +29,7 @@ def send_and_stream(
     ws_timeout=60,
     language=None,
     abort_event=None,
+    speaker=None,
 ):
     """
     POST user_message to orchestrator, then consume WebSocket stream.
@@ -46,6 +47,8 @@ def send_and_stream(
     payload = {"message": user_message, "session_id": session_id}
     if language:
         payload["language"] = language
+    if speaker:
+        payload["speaker"] = speaker
 
     try:
         r = requests.post(

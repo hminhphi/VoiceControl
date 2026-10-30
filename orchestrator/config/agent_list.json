@@ -1,22 +1,22 @@
 {
-    "car_control":  {
-                        "url":  "http://car_control:8001",
-                        "enabled":  true
-                    },
-    "car_manual":  {
-                       "url":  "http://car_manual:8002",
-                       "enabled":  true
-                   },
-    "infotainment":  {
-                         "url":  "http://infotainment:8004",
-                         "enabled":  false
-                     },
-    "cloud":  {
-                  "url":  "http://cloud:8005",
-                  "enabled":  false
-              },
-    "navigation":  {
-                       "url":  "http://navigation:8003",
-                       "enabled":  false
-                   }
+  "navigation": {
+    "enabled": false,
+    "url": "http://navigation:8003"
+  },
+  "cloud": {
+    "enabled": false,
+    "url": "http://cloud:8005"
+  },
+  "car_control": {
+    "enabled": true,
+    "url": "http://car_control:8001"
+  },
+  "infotainment": {
+    "enabled": false,
+    "url": "http://infotainment:8004"
+  },
+  "car_manual": {
+    "enabled": true,
+    "url": "http://car_manual:8002"
+  }
 }
