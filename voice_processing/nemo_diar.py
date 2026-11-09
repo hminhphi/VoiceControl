@@ -121,10 +121,12 @@ def _resolve_binary():
 
 def _model():
     env = _env("NEMO_SPEECH_DIAR_MODEL")
-    if env:
-        return env
+    # Compose always passes an index name by default; prefer the bundled
+    # GGUF so the runtime never attempts an (offline) HF download.
     if os.path.isfile(DEFAULT_MODEL):
         return DEFAULT_MODEL
+    if env:
+        return env
     return "nemotron-3-diarization"
 
 
@@ -154,12 +156,17 @@ class NemoDiarizer:
         self.model = model or _model()
         self.device = _env("NEMO_DIAR_DEVICE", "cpu")
         self.preset = _env("NEMO_DIAR_PRESET", "v3-offline")
-        self.timeout = _env_float("NEMO_DIAR_TIMEOUT_SEC", 20.0)
+        self.timeout = _env_float("NEMO_DIAR_TIMEOUT_SEC", 8.0)
         self.available = os.path.isfile(self.binary)
+        # Circuit breaker: a failing runtime must not cost time per turn.
+        self._disabled_until = 0.0
+        self._fail_count = 0
 
     def analyze(self, wav_16k):
         """Diarize one turn. `wav_16k` is float32 mono 16 kHz."""
         if not self.available:
+            return None
+        if time.time() < self._disabled_until:
             return None
         audio = np.asarray(wav_16k, dtype=np.float32)
         if audio.size < SAMPLE_RATE // 2:
@@ -195,6 +202,8 @@ class NemoDiarizer:
                 os.unlink(path)
             except OSError:
                 pass
+        self._fail_count = 0
+        self._disabled_until = 0.0
         speakers = sorted({int(s["speaker"]) for s in segments if s.get("speaker") is not None})
         duration = float(payload.get("duration") or total)
         return {
@@ -233,6 +242,19 @@ def get_diarizer():
                 )
         return _SINGLETON
 
+
+def note_failure(max_count=3, hold=120.0):
+    """Circuit-break the diarizer after repeated failures (offline box).
+    Call from the caller except block.
+    """
+    global _SINGLETON
+    d = _SINGLETON
+    if d is None:
+        return
+    d._fail_count += 1
+    if d._fail_count >= max_count:
+        d._disabled_until = time.time() + hold
+        print(f"[DIAR] disabled for {hold:.0f}s after {d._fail_count} failures", flush=True)
 
 def speaker_label(spk):
     if spk is None:

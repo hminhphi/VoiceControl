@@ -43,7 +43,7 @@ from notification_sounds import play_into_queue as play_notification
 from wake_word import WakeWordProcessor
 from vad import VADProcessor
 from smart_turn import detect_turn_complete
-from nemo_diar import get_diarizer
+from nemo_diar import get_diarizer, note_failure as diar_note_failure
 from speaker_id import get_identifier, rollcall_name
 from pipeline_state import get_state
 from stt import STTProcessor
@@ -857,6 +857,7 @@ def run():
                                         )
                         except Exception as e:
                             print(f"[DIAR][error] {e}", flush=True)
+                            diar_note_failure()
                     # ── Speaker overlap / TSE / gate (opt-in, GPU) ──
                     if (SPEAKER_ENABLED or SPEAKER_TSE_ENABLED) and wav16 is not None:
                         try:

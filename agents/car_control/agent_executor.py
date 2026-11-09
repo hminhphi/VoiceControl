@@ -390,6 +390,12 @@ def _match_actions_with_meta(
 
 
 def _graphql_client_optional():
+    # Jetson / offline demo: CAR_CONTROL_LOCAL_ONLY=1 forces the local car
+    # simulator (GraphQL to the cloud would only burn seconds on DNS fails).
+    if (os.environ.get("CAR_CONTROL_LOCAL_ONLY", "0").strip().lower()
+            in ("1", "true", "yes", "on")):
+        logger.info("CAR_CONTROL_LOCAL_ONLY=1 -> using local car simulator only")
+        return None
     if os.environ.get("GRAPHQL_HOST") and os.environ.get("GRAPHQL_API_KEY"):
         try:
             return RemoteGraphQLClient()

@@ -69,7 +69,7 @@ class RemoteGraphQLClient:
                 "value": value,
             },
         }
-        response = requests.post(self.url, json=payload, headers=self.headers, timeout=10)
+        response = requests.post(self.url, json=payload, headers=self.headers, timeout=(2.0, 4.0))
         result = response.json()
         logger.info("GraphQL response: %s", result)
         return True

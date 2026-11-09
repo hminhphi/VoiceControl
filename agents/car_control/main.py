@@ -62,5 +62,16 @@ app.add_route("/sounds/resolve", sounds_resolve, ["GET"])
 if os.path.isdir(SOUNDS_DIR):
     app.mount("/static/sounds", StaticFiles(directory=SOUNDS_DIR), name="sounds")
 
+# State API (same as main_pc.py): lets the orchestrator see live car state in
+# the LLM context and the UI mirror the simulator on Jetson (/state, /control).
+if os.environ.get("CAR_CONTROL_ENABLE_STATE_API", "1").lower() in ("1", "true", "yes"):
+    try:
+        from state_server import mount as mount_state
+
+        mount_state(app)
+        print("[car_control] state_server mounted: /state /control /events", flush=True)
+    except Exception as e:  # pragma: no cover - startup resilience
+        print(f"[car_control][main] state_server mount failed: {e}", flush=True)
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)
